@@ -21,3 +21,6 @@ spring:
 
 gmail:
   api-base-url: https://gmail.googleapis.com
+
+app:
+  frontend-url: http://localhost:5173

@@ -1,5 +1,7 @@
 package com.email.declutter_ai.email;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -13,4 +15,9 @@ public interface EmailMessageRepository extends JpaRepository<EmailMessage, Long
 
 	Page<EmailMessage> findByAccountEmailOrderByReceivedAtDesc(
 			String accountEmail, Pageable pageable);
+
+	List<EmailMessage> findByAccountEmailOrderByReceivedAtDesc(String accountEmail);
+
+	List<EmailMessage> findByAccountEmailAndReceivedAtBetweenOrderByReceivedAtDesc(
+			String accountEmail, Instant startDate, Instant endDate);
 }

@@ -1,31 +1,51 @@
 # Declutter AI
 
-Spring Boot service for connecting a Gmail account and reading message metadata.
+API-first email cleanup product with a Spring Boot backend and React web client.
 
-## Gmail setup
+## Structure
 
-1. Create a project in Google Cloud Console.
-2. Enable the Gmail API.
-3. Configure the OAuth consent screen and add your Google account as a test user.
-4. Create an OAuth 2.0 Client ID of type **Web application**.
-5. Add this authorized redirect URI:
+```text
+backend/  Spring Boot API, Gmail integration, PostgreSQL persistence
+web/      React + TypeScript + Vite web application
+```
 
-   `http://localhost:8080/login/oauth2/code/google`
+## Run the backend
 
-6. Start the application with the credentials:
+The backend requires Java 21, PostgreSQL, and Google OAuth credentials.
 
 ```bash
+export JAVA_HOME="$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home"
+export PATH="$JAVA_HOME/bin:$PATH"
 export GOOGLE_CLIENT_ID="your-client-id"
 export GOOGLE_CLIENT_SECRET="your-client-secret"
+
+cd backend
 ./gradlew bootRun
 ```
 
-Open `http://localhost:8080/oauth2/authorization/google` to connect Gmail, then
-request `http://localhost:8080/api/gmail/messages`.
+It runs at `http://localhost:8080`.
 
-The integration requests the `gmail.metadata` scope. It reads headers, labels,
-timestamps, and message sizes, but not email bodies or attachments.
+## Run the web app
 
-After connecting Gmail, open `http://localhost:8080/` and use the sync button.
-It upserts 25 messages into PostgreSQL. Stored metadata is available at
-`http://localhost:8080/api/gmail/stored`.
+In a second terminal:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. Vite proxies `/api`, `/oauth2`, and `/login`
+requests to the Spring backend during local development.
+
+## Gmail OAuth setup
+
+Enable the Gmail API, configure the consent screen and test user, and create an
+OAuth Web application with this redirect URI:
+
+```text
+http://localhost:8080/login/oauth2/code/google
+```
+
+The backend requests `gmail.metadata`, which permits headers, labels, timestamps,
+and message sizes but not email bodies or attachments.
