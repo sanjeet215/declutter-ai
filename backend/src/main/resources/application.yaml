@@ -20,7 +20,8 @@ spring:
               - openid
               - profile
               - email
-              - https://www.googleapis.com/auth/gmail.metadata
+              - https://www.googleapis.com/auth/gmail.modify
+              - https://www.googleapis.com/auth/drive.metadata.readonly
 
 gmail:
   api-base-url: https://gmail.googleapis.com

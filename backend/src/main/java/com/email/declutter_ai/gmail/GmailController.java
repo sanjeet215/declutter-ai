@@ -33,7 +33,7 @@ public class GmailController {
 	@GetMapping("/messages")
 	MessagePage messages(
 			@RegisteredOAuth2AuthorizedClient("google") OAuth2AuthorizedClient authorizedClient,
-			@RequestParam(defaultValue = "25") @Min(1) @Max(100) int maxResults,
+			@RequestParam(defaultValue = "100") @Min(1) @Max(100) int maxResults,
 			@RequestParam(required = false) String pageToken) {
 		return gmailClient.listMetadata(
 				authorizedClient.getAccessToken().getTokenValue(),
@@ -45,7 +45,7 @@ public class GmailController {
 	SyncResult sync(
 			@RegisteredOAuth2AuthorizedClient("google") OAuth2AuthorizedClient authorizedClient,
 			@AuthenticationPrincipal OidcUser user,
-			@RequestParam(defaultValue = "25") @Min(1) @Max(100) int maxResults,
+			@RequestParam(defaultValue = "100") @Min(1) @Max(100) int maxResults,
 			@RequestParam(required = false) String pageToken) {
 		return emailSyncService.syncPage(
 				user.getEmail(),
@@ -57,7 +57,7 @@ public class GmailController {
 	@GetMapping("/stored")
 	java.util.List<StoredEmailMetadata> stored(
 			@AuthenticationPrincipal OidcUser user,
-			@RequestParam(defaultValue = "25") @Min(1) @Max(100) int limit) {
+			@RequestParam(defaultValue = "100") @Min(1) @Max(100) int limit) {
 		return emailSyncService.listStored(user.getEmail(), limit);
 	}
 }

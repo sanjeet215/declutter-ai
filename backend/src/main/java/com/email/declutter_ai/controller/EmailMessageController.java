@@ -1,26 +1,41 @@
-package com.email.declutter_ai.email;
+package com.email.declutter_ai.controller;
 
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.annotation.RegisteredOAuth2AuthorizedClient;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import com.email.declutter_ai.email.EmailMessage;
+import com.email.declutter_ai.email.EmailMessageRepository;
+import com.email.declutter_ai.email.EmailSyncService;
+import com.email.declutter_ai.email.DomainMessageCount;
+import com.email.declutter_ai.email.SenderMessageCount;
 
 @RestController
 @RequestMapping("/api/emails")
 public class EmailMessageController {
 
 	private final EmailMessageRepository emailMessageRepository;
+	private final EmailSyncService emailSyncService;
 
-	public EmailMessageController(EmailMessageRepository emailMessageRepository) {
+	public EmailMessageController(
+			EmailMessageRepository emailMessageRepository,
+			EmailSyncService emailSyncService) {
 		this.emailMessageRepository = emailMessageRepository;
+		this.emailSyncService = emailSyncService;
 	}
 
 	@GetMapping("/aggregate")
@@ -36,13 +51,12 @@ public class EmailMessageController {
 			emails = emailMessageRepository.findByAccountEmailAndReceivedAtBetweenOrderByReceivedAtDesc(
 					accountEmail, startDate, endDate);
 		} else {
-			emails = emailMessageRepository.findByAccountEmailOrderByReceivedAtDesc(accountEmail, null);
+			emails = emailMessageRepository.findByAccountEmailOrderByReceivedAtDesc(accountEmail);
 		}
 
 		Map<String, Object> aggregation = new HashMap<>();
 		aggregation.put("totalEmails", emails.size());
 		aggregation.put("totalSize", emails.stream().mapToInt(e -> e.getSizeEstimate() != null ? e.getSizeEstimate() : 0).sum());
-		aggregation.put("averageSize", emails.stream().mapToInt(e -> e.getSizeEstimate() != null ? e.getSizeEstimate() : 0).average().orElse(0));
 		aggregation.put("uniqueSenders", emails.stream().map(EmailMessage::getSender).filter(s -> s != null).distinct().count());
 		aggregation.put("emailsByLabel", aggregateByLabel(emails));
 		aggregation.put("emailsBySender", aggregateBySender(emails));
@@ -53,17 +67,74 @@ public class EmailMessageController {
 	@GetMapping("/stats")
 	Map<String, Object> stats(@AuthenticationPrincipal OidcUser user) {
 		String accountEmail = user.getEmail();
-		List<EmailMessage> emails = emailMessageRepository.findByAccountEmailOrderByReceivedAtDesc(accountEmail, null);
+		List<EmailMessage> emails = emailMessageRepository.findByAccountEmailOrderByReceivedAtDesc(accountEmail);
 
 		Map<String, Object> stats = new HashMap<>();
 		stats.put("totalEmails", emails.size());
 		stats.put("totalSizeBytes", emails.stream().mapToInt(e -> e.getSizeEstimate() != null ? e.getSizeEstimate() : 0).sum());
-		stats.put("averageSizeBytes", emails.stream().mapToInt(e -> e.getSizeEstimate() != null ? e.getSizeEstimate() : 0).average().orElse(0));
 		stats.put("uniqueSenders", emails.stream().map(EmailMessage::getSender).filter(s -> s != null).distinct().count());
 		stats.put("earliestEmail", emails.stream().map(EmailMessage::getReceivedAt).filter(d -> d != null).min(Instant::compareTo).orElse(null));
 		stats.put("latestEmail", emails.stream().map(EmailMessage::getReceivedAt).filter(d -> d != null).max(Instant::compareTo).orElse(null));
 		
 		return stats;
+	}
+
+	@GetMapping("/senders")
+	List<SenderMessageCount> senders(@AuthenticationPrincipal OidcUser user) {
+		return emailMessageRepository.findSenderMessageCounts(user.getEmail());
+	}
+
+	@GetMapping("/domains")
+	List<DomainMessageCount> domains(@AuthenticationPrincipal OidcUser user) {
+		return emailMessageRepository.findSenderMessageCounts(user.getEmail())
+				.stream()
+				.filter(sender -> emailSyncService.senderDomain(sender.sender()) != null)
+				.collect(Collectors.groupingBy(
+						sender -> emailSyncService.senderDomain(sender.sender()),
+						Collectors.summingLong(SenderMessageCount::messageCount)))
+				.entrySet()
+				.stream()
+				.map(entry -> new DomainMessageCount(entry.getKey(), entry.getValue()))
+				.sorted(java.util.Comparator
+						.comparingLong(DomainMessageCount::messageCount)
+						.reversed()
+						.thenComparing(DomainMessageCount::domain))
+				.toList();
+	}
+
+	@DeleteMapping("/senders")
+	Map<String, Object> deleteBySender(
+			@RegisteredOAuth2AuthorizedClient("google") OAuth2AuthorizedClient authorizedClient,
+			@AuthenticationPrincipal OidcUser user,
+			@RequestParam String sender) {
+		int deleted = emailSyncService.trashBySender(
+				user.getEmail(),
+				authorizedClient.getAccessToken().getTokenValue(),
+				sender);
+		return Map.of("sender", sender, "deletedMessages", deleted);
+	}
+
+	@DeleteMapping("/domains")
+	Map<String, Object> deleteByDomain(
+			@RegisteredOAuth2AuthorizedClient("google") OAuth2AuthorizedClient authorizedClient,
+			@AuthenticationPrincipal OidcUser user,
+			@RequestParam String domain) {
+		int deleted = emailSyncService.trashByDomain(
+				user.getEmail(),
+				authorizedClient.getAccessToken().getTokenValue(),
+				domain);
+		return Map.of("domain", domain, "deletedMessages", deleted);
+	}
+
+	@DeleteMapping("/{messageId}")
+	void deleteMessage(
+			@RegisteredOAuth2AuthorizedClient("google") OAuth2AuthorizedClient authorizedClient,
+			@AuthenticationPrincipal OidcUser user,
+			@PathVariable Long messageId) {
+		emailSyncService.trashMessage(
+				user.getEmail(),
+				authorizedClient.getAccessToken().getTokenValue(),
+				messageId);
 	}
 
 	private Map<String, Long> aggregateByLabel(List<EmailMessage> emails) {

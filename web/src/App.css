@@ -85,10 +85,22 @@ h1 {
   background: #19492d;
 }
 
+.button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .secondary {
   color: #20372a;
   background: white;
   border-color: #d8e0da;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 370px;
+  gap: 18px;
+  align-items: stretch;
 }
 
 .summary {
@@ -122,6 +134,114 @@ h1 {
   font-size: 13px;
 }
 
+.storage-card {
+  padding: 24px;
+  border: 1px solid #dde5df;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 18px 50px rgba(36, 70, 48, 0.06);
+}
+
+.storage-card .eyebrow {
+  margin-bottom: 18px;
+}
+
+.storage-card h2 {
+  margin: 0 0 10px;
+  color: #15231b;
+  font-size: 22px;
+}
+
+.storage-content {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+}
+
+.donut {
+  display: grid;
+  width: 128px;
+  height: 128px;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.donut::before {
+  content: "";
+  grid-area: 1 / 1;
+  width: 82px;
+  height: 82px;
+  border-radius: 50%;
+  background: white;
+}
+
+.donut div {
+  z-index: 1;
+  display: flex;
+  grid-area: 1 / 1;
+  flex-direction: column;
+  text-align: center;
+}
+
+.donut strong {
+  color: #1d3225;
+  font-size: 16px;
+}
+
+.donut span {
+  color: #7a867e;
+  font-size: 10px;
+}
+
+.storage-legend {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: 9px;
+  list-style: none;
+}
+
+.storage-legend li {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.storage-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.storage-legend .mail { background: #367a50; }
+.storage-legend .drive { background: #79a98a; }
+.storage-legend .other { background: #d2a95f; }
+.storage-legend .free { background: #e6ece7; border: 1px solid #cfd8d1; }
+
+.storage-legend span {
+  overflow: hidden;
+  color: #68766d;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-legend strong {
+  color: #24392c;
+}
+
+.storage-unavailable {
+  margin: 0;
+  color: #78847c;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.senders,
+.domains,
 .inbox {
   margin-top: 72px;
 }
@@ -154,6 +274,85 @@ h1 {
   border: 1px solid #dde5df;
   border-radius: 18px;
   background: white;
+}
+
+.sender-list {
+  overflow: hidden;
+  border: 1px solid #dde5df;
+  border-radius: 18px;
+  background: white;
+}
+
+.sender-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 15px;
+  align-items: center;
+  padding: 18px 20px;
+}
+
+.sender-row + .sender-row {
+  border-top: 1px solid #edf1ee;
+}
+
+.sender-row strong {
+  overflow: hidden;
+  color: #22382a;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sender-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.sender-actions span {
+  color: #7a867e;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.delete-button {
+  min-width: 124px;
+  padding: 7px 12px;
+  border: 1px solid #e5c5c5;
+  border-radius: 999px;
+  color: #a23b3b;
+  background: #fff8f8;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.delete-button:hover:not(:disabled) {
+  border-color: #d99d9d;
+  background: #fff0f0;
+}
+
+.delete-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.inline-error {
+  margin: 12px 4px 0;
+  color: #a23b3b;
+  font-size: 13px;
+}
+
+.inline-success {
+  margin: 18px 0 0;
+  padding: 13px 16px;
+  border: 1px solid #b9ddc4;
+  border-radius: 12px;
+  color: #1e6138;
+  background: #eaf7ee;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .message {
@@ -209,6 +408,24 @@ h1 {
   text-align: right;
 }
 
+.message-delete-button {
+  margin-top: 5px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 999px;
+  color: #a23b3b;
+  background: #fff0f0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.message-delete-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .state {
   padding: 42px;
   border: 1px dashed #ccd8cf;
@@ -239,6 +456,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
   .summary article + article {
     border-top: 1px solid #e3e9e5;
     border-left: 0;
@@ -246,6 +467,15 @@ h1 {
 
   .message {
     grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .sender-row {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .sender-actions {
+    grid-column: 2;
+    justify-content: space-between;
   }
 
   .message-meta {

@@ -47,5 +47,5 @@ OAuth Web application with this redirect URI:
 http://localhost:8080/login/oauth2/code/google
 ```
 
-The backend requests `gmail.metadata`, which permits headers, labels, timestamps,
-and message sizes but not email bodies or attachments.
+The backend requests `gmail.modify`, which permits metadata access and moving
+messages to Trash. It does not read email bodies or attachments.
