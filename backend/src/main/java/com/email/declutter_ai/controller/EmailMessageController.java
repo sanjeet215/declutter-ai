@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.annotation.RegisteredOAuth2AuthorizedClient;
@@ -23,6 +24,9 @@ import com.email.declutter_ai.email.EmailMessageRepository;
 import com.email.declutter_ai.email.EmailSyncService;
 import com.email.declutter_ai.email.DomainMessageCount;
 import com.email.declutter_ai.email.SenderMessageCount;
+
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 @RestController
 @RequestMapping("/api/emails")
@@ -80,8 +84,19 @@ public class EmailMessageController {
 	}
 
 	@GetMapping("/senders")
-	List<SenderMessageCount> senders(@AuthenticationPrincipal OidcUser user) {
-		return emailMessageRepository.findSenderMessageCounts(user.getEmail());
+	SenderPage senders(
+			@AuthenticationPrincipal OidcUser user,
+			@RequestParam(defaultValue = "0") @Min(0) int page,
+			@RequestParam(defaultValue = "15") @Min(1) @Max(100) int size) {
+		var result = emailMessageRepository.findSenderMessageCountsPage(
+				user.getEmail(), PageRequest.of(page, size));
+		return new SenderPage(
+				result.getContent(),
+				result.getNumber(),
+				result.getTotalPages(),
+				result.getTotalElements(),
+				result.hasNext(),
+				result.hasPrevious());
 	}
 
 	@GetMapping("/domains")
@@ -156,5 +171,14 @@ public class EmailMessageController {
 			}
 		}
 		return senderCounts;
+	}
+
+	record SenderPage(
+			List<SenderMessageCount> senders,
+			int page,
+			int totalPages,
+			long totalSenders,
+			boolean hasNext,
+			boolean hasPrevious) {
 	}
 }

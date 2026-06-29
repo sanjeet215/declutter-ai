@@ -1,34 +1,18 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
-type EmailMetadata = {
-  id: number
-  gmailMessageId: string
-  from: string | null
-  subject: string | null
-  receivedAt: string | null
-  sizeEstimate: number | null
-  labels: string[]
-}
-
 type SenderMessageCount = {
   sender: string
   messageCount: number
 }
 
-type DomainMessageCount = {
-  domain: string
-  messageCount: number
-}
-
-type StorageBreakdown = {
-  limitBytes: number | null
-  usedBytes: number
-  freeBytes: number | null
-  driveBytes: number
-  driveTrashBytes: number
-  syncedMailBytes: number
-  photosAndOtherBytes: number
+type SenderPage = {
+  senders: SenderMessageCount[]
+  page: number
+  totalPages: number
+  totalSenders: number
+  hasNext: boolean
+  hasPrevious: boolean
 }
 
 type CsrfResponse = {
@@ -40,15 +24,24 @@ type DeleteResult = {
   deletedMessages: number
 }
 
+type SyncStatus = {
+  state: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED'
+  processed: number
+  created: number
+  updated: number
+  total: number
+  error: string | null
+}
+
 let csrf: CsrfResponse | null = null
 
 const mutation = async (url: string, method: 'POST' | 'DELETE') => {
   if (!csrf) {
-    const csrfResponse = await fetch('/api/auth/csrf', {
+    const response = await fetch('/api/auth/csrf', {
       headers: { Accept: 'application/json' },
     })
-    if (!csrfResponse.ok) throw new Error('Unable to initialize a secure request.')
-    csrf = await csrfResponse.json()
+    if (!response.ok) throw new Error('Unable to initialize a secure request.')
+    csrf = await response.json()
   }
   const csrfToken = csrf
   if (!csrfToken) throw new Error('Unable to initialize a secure request.')
@@ -70,133 +63,84 @@ const apiError = async (response: Response, fallback: string) => {
     // The backend did not return a JSON error body.
   }
   if (response.status === 401) return 'Connect Gmail before using this action.'
-  if (response.status === 403) {
-    return 'Reconnect Gmail and approve permission to move messages to Trash.'
-  }
+  if (response.status === 403) return 'Reconnect Gmail and approve Gmail access.'
   return fallback
 }
 
 function App() {
-  const [messages, setMessages] = useState<EmailMetadata[]>([])
   const [senders, setSenders] = useState<SenderMessageCount[]>([])
-  const [domains, setDomains] = useState<DomainMessageCount[]>([])
-  const [storage, setStorage] = useState<StorageBreakdown | null>(null)
-  const [storageError, setStorageError] = useState<string | null>(null)
+  const [senderPage, setSenderPage] = useState(0)
+  const [senderPageInfo, setSenderPageInfo] = useState<SenderPage | null>(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [syncSeconds, setSyncSeconds] = useState(0)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [deletingSender, setDeletingSender] = useState<string | null>(null)
-  const [deletingDomain, setDeletingDomain] = useState<string | null>(null)
-  const [deletingMessageId, setDeletingMessageId] = useState<number | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
-  const loadMessages = async () => {
+  const loadSenders = async (page = senderPage) => {
     setLoading(true)
     setError(null)
-
     try {
-      const response = await fetch('/api/gmail/stored?limit=100', {
+      const response = await fetch(`/api/emails/senders?${new URLSearchParams({
+        page: page.toString(),
+        size: '15',
+      })}`, {
         headers: { Accept: 'application/json' },
       })
-      const contentType = response.headers.get('content-type') ?? ''
-
-      if (!response.ok || !contentType.includes('application/json')) {
-        throw new Error('Connect Gmail before loading your stored messages.')
+      if (!response.ok) {
+        throw new Error(await apiError(response, 'Unable to load sender counts.'))
       }
-
-      setMessages(await response.json())
+      const result: SenderPage = await response.json()
+      setSenders(result.senders)
+      setSenderPageInfo(result)
     } catch (caught) {
-      setMessages([])
-      setError(caught instanceof Error ? caught.message : 'Unable to load messages.')
+      setSenders([])
+      setError(caught instanceof Error ? caught.message : 'Unable to load sender counts.')
     } finally {
       setLoading(false)
     }
   }
 
-  const loadSenders = async () => {
-    try {
-      const response = await fetch('/api/emails/senders', {
-        headers: { Accept: 'application/json' },
-      })
-      if (response.ok) {
-        setSenders(await response.json())
-      }
-    } catch {
-      setSenders([])
-    }
-  }
-
-  const loadDomains = async () => {
-    try {
-      const response = await fetch('/api/emails/domains', {
-        headers: { Accept: 'application/json' },
-      })
-      if (response.ok) setDomains(await response.json())
-    } catch {
-      setDomains([])
-    }
-  }
-
-  const loadStorage = async () => {
-    setStorageError(null)
-    try {
-      const response = await fetch('/api/storage', {
-        headers: { Accept: 'application/json' },
-      })
-      if (!response.ok) {
-        throw new Error(await apiError(response, 'Storage details are unavailable.'))
-      }
-      setStorage(await response.json())
-    } catch (caught) {
-      setStorage(null)
-      setStorageError(caught instanceof Error ? caught.message : 'Storage details are unavailable.')
-    }
-  }
-
-  const syncMessages = async () => {
+  const syncMailbox = async () => {
     setSyncing(true)
+    setSyncSeconds(0)
+    setSyncStatus(null)
     setError(null)
+    setSuccess(null)
     try {
-      const response = await mutation('/api/gmail/sync?maxResults=100', 'POST')
+      const response = await mutation('/api/gmail/sync', 'POST')
       if (!response.ok) {
-        throw new Error(await apiError(response, 'Unable to sync messages from Gmail.'))
+        throw new Error(await apiError(response, 'Unable to sync the Gmail mailbox.'))
       }
-      await Promise.all([loadMessages(), loadSenders(), loadDomains(), loadStorage()])
+      const initialStatus: SyncStatus = await response.json()
+      setSyncStatus(initialStatus)
+      const result = await waitForSync()
+      if (result.state === 'FAILED') {
+        throw new Error(result.error ?? 'Mailbox sync failed.')
+      }
+      setSuccess(`Synced ${result.processed} messages from Gmail.`)
+      await loadSenders(senderPage)
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to sync messages.')
+      setError(caught instanceof Error ? caught.message : 'Unable to sync the Gmail mailbox.')
     } finally {
       setSyncing(false)
     }
   }
 
-  const deleteDomainMessages = async (domain: string, messageCount: number) => {
-    if (!window.confirm(
-      `Move every Gmail message from @${domain} and its subdomains to Trash? ` +
-      `This matches ${domain} and *.${domain}. ` +
-      `${messageCount} ${messageCount === 1 ? 'message is' : 'messages are'} currently synced.`,
-    )) return
-
-    setDeletingDomain(domain)
-    setDeleteError(null)
-    setDeleteSuccess(null)
-    try {
-      const response = await mutation(
-        `/api/emails/domains?${new URLSearchParams({ domain })}`,
-        'DELETE',
-      )
+  const waitForSync = async (): Promise<SyncStatus> => {
+    while (true) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000))
+      const response = await fetch('/api/gmail/sync/status', {
+        headers: { Accept: 'application/json' },
+      })
       if (!response.ok) {
-        throw new Error(await apiError(response, `Unable to delete messages from ${domain}.`))
+        throw new Error(await apiError(response, 'Unable to read mailbox sync progress.'))
       }
-      const result: DeleteResult = await response.json()
-      setDeleteSuccess(
-        `Moved ${result.deletedMessages} ${result.deletedMessages === 1 ? 'message' : 'messages'} from ${domain} to Trash.`,
-      )
-      await Promise.all([loadMessages(), loadSenders(), loadDomains(), loadStorage()])
-    } catch (caught) {
-      setDeleteError(caught instanceof Error ? caught.message : 'Unable to delete messages.')
-    } finally {
-      setDeletingDomain(null)
+      const status: SyncStatus = await response.json()
+      setSyncStatus(status)
+      if (status.state !== 'RUNNING') return status
     }
   }
 
@@ -207,8 +151,8 @@ function App() {
     )) return
 
     setDeletingSender(sender)
-    setDeleteError(null)
-    setDeleteSuccess(null)
+    setError(null)
+    setSuccess(null)
     try {
       const response = await mutation(
         `/api/emails/senders?${new URLSearchParams({ sender })}`,
@@ -218,282 +162,188 @@ function App() {
         throw new Error(await apiError(response, 'Unable to delete messages from this sender.'))
       }
       const result: DeleteResult = await response.json()
-      setDeleteSuccess(
-        `Moved ${result.deletedMessages} ${result.deletedMessages === 1 ? 'message' : 'messages'} to Trash.`,
-      )
-      await Promise.all([loadMessages(), loadSenders(), loadDomains(), loadStorage()])
+      setSuccess(`Moved ${result.deletedMessages} messages to Trash.`)
+      if (senders.length === 1 && senderPage > 0) {
+        setSenderPage((page) => page - 1)
+      } else {
+        await loadSenders(senderPage)
+      }
     } catch (caught) {
-      setDeleteError(caught instanceof Error ? caught.message : 'Unable to delete messages.')
+      setError(caught instanceof Error ? caught.message : 'Unable to delete messages.')
     } finally {
       setDeletingSender(null)
     }
   }
 
-  const deleteMessage = async (message: EmailMetadata) => {
-    if (!window.confirm(`Move "${message.subject || '(No subject)'}" to Gmail Trash?`)) return
-
-    setDeletingMessageId(message.id)
-    setDeleteError(null)
-    setDeleteSuccess(null)
-    try {
-      const response = await mutation(`/api/emails/${message.id}`, 'DELETE')
-      if (!response.ok) {
-        throw new Error(await apiError(response, 'Unable to move this message to Trash.'))
-      }
-      setDeleteSuccess('Moved 1 message to Trash.')
-      await Promise.all([loadMessages(), loadSenders(), loadDomains(), loadStorage()])
-    } catch (caught) {
-      setDeleteError(caught instanceof Error ? caught.message : 'Unable to delete message.')
-    } finally {
-      setDeletingMessageId(null)
-    }
-  }
+  useEffect(() => {
+    void loadSenders(senderPage)
+  }, [senderPage])
 
   useEffect(() => {
-    void loadMessages()
-    void loadSenders()
-    void loadDomains()
-    void loadStorage()
-  }, [])
+    if (!syncing) return
+    const timer = window.setInterval(() => {
+      setSyncSeconds((seconds) => seconds + 1)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [syncing])
 
   return (
     <main>
       <header className="topbar">
         <a className="brand" href="/">Declutter<span>AI</span></a>
-        <a className="button secondary" href="/oauth2/authorization/google">
-          Connect Gmail
-        </a>
+        <a className="button secondary" href="/oauth2/authorization/google">Connect Gmail</a>
       </header>
 
       <section className="hero">
-        <p className="eyebrow">A calmer inbox starts here</p>
-        <h1>See what is filling your inbox.</h1>
+        <p className="eyebrow">Mailbox overview</p>
+        <h1>Messages by sender.</h1>
         <p className="lede">
-          Import email metadata safely, understand the noise, and make confident
-          cleanup decisions without reading message bodies.
+          Sync mailbox metadata, then see how many messages came from each sender.
+          Message bodies and attachments are not stored.
         </p>
         <div className="actions">
-          <button className="button primary" disabled={syncing} onClick={() => void syncMessages()}>
-            {syncing ? 'Syncing…' : 'Sync latest 100'}
+          <button className="button primary" disabled={syncing} onClick={() => void syncMailbox()}>
+            {syncing ? 'Syncing full mailbox…' : 'Sync full mailbox'}
           </button>
-          <button className="button secondary" onClick={() => {
-            void loadMessages()
-            void loadSenders()
-            void loadDomains()
-            void loadStorage()
-          }}>
-            Refresh messages
+          <button className="button secondary" disabled={loading} onClick={() => void loadSenders(senderPage)}>
+            Refresh counts
           </button>
         </div>
       </section>
 
-      <div className="overview-grid">
-        <section className="summary" aria-label="Inbox summary">
-          <article>
-            <strong>{messages.length}</strong>
-            <span>messages loaded</span>
-          </article>
-          <article>
-            <strong>{new Set(messages.map((message) => message.from).filter(Boolean)).size}</strong>
-            <span>unique senders</span>
-          </article>
-          <article>
-            <strong>{formatBytes(messages.reduce((sum, message) => sum + (message.sizeEstimate ?? 0), 0))}</strong>
-            <span>synced mail size</span>
-          </article>
-        </section>
-        <StorageCard storage={storage} error={storageError} />
-      </div>
-
-      {deleteSuccess && <p className="inline-success" role="status">{deleteSuccess}</p>}
-
-      {senders.length > 0 && (
-        <section className="senders">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Sender breakdown</p>
-              <h2>Messages by sender</h2>
+      {(syncing || syncStatus) && (
+        <section className={`sync-status ${
+          syncing ? 'is-syncing' : syncStatus?.state === 'FAILED' ? 'is-failed' : 'is-complete'
+        }`} aria-live="polite">
+          <div className="sync-indicator" aria-hidden="true">
+            {syncing
+              ? <span className="sync-spinner" />
+              : <span className="sync-check">{syncStatus?.state === 'FAILED' ? '!' : '✓'}</span>}
+          </div>
+          <div className="sync-copy">
+            <strong>
+              {syncing
+                ? 'Sync in progress'
+                : syncStatus?.state === 'FAILED' ? 'Mailbox sync failed' : 'Mailbox sync complete'}
+            </strong>
+            <span>
+              {syncing
+                ? 'Reading Gmail metadata page by page. Large mailboxes can take a few minutes.'
+                : `${syncStatus?.processed.toLocaleString()} messages processed.`}
+            </span>
+          </div>
+          <div className="sync-numbers">
+            {syncing ? (
+              <>
+                <SyncMetric value={formatDuration(syncSeconds)} label="elapsed" />
+                <SyncMetric
+                  value={`${(syncStatus?.processed ?? 0).toLocaleString()} / ${(syncStatus?.total || 0).toLocaleString()}`}
+                  label="processed"
+                />
+                <SyncMetric value={(syncStatus?.created ?? 0).toLocaleString()} label="new" />
+              </>
+            ) : (
+              <>
+                <SyncMetric value={(syncStatus?.processed ?? 0).toLocaleString()} label="processed" />
+                <SyncMetric value={(syncStatus?.created ?? 0).toLocaleString()} label="new" />
+                <SyncMetric value={(syncStatus?.updated ?? 0).toLocaleString()} label="updated" />
+              </>
+            )}
+          </div>
+          {syncing && (
+            <div className="sync-progress" aria-hidden="true">
+              <span
+                className={syncStatus?.total ? 'is-determinate' : ''}
+                style={syncStatus?.total
+                  ? { width: `${Math.min(100, (syncStatus.processed / syncStatus.total) * 100)}%` }
+                  : undefined}
+              />
             </div>
-          </div>
-          <div className="sender-list">
-            {senders.map(({ sender, messageCount }) => (
-              <article className="sender-row" key={sender}>
-                <div className="avatar">{senderInitial(sender)}</div>
-                <strong>{sender}</strong>
-                <div className="sender-actions">
-                  <span>{messageCount} {messageCount === 1 ? 'message' : 'messages'}</span>
-                  <button
-                    className="delete-button"
-                    disabled={deletingSender !== null}
-                    onClick={() => void deleteSenderMessages(sender, messageCount)}
-                  >
-                    {deletingSender === sender ? 'Moving…' : 'Move all to Trash'}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-          {deleteError && <p className="inline-error" role="alert">{deleteError}</p>}
+          )}
         </section>
       )}
 
-      {domains.length > 0 && (
-        <section className="domains">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Domain breakdown</p>
-              <h2>Messages by domain</h2>
-            </div>
-          </div>
-          <div className="sender-list">
-            {domains.map(({ domain, messageCount }) => (
-              <article className="sender-row" key={domain}>
-                <div className="avatar">@</div>
-                <strong>{domain}</strong>
-                <div className="sender-actions">
-                  <span>{messageCount} {messageCount === 1 ? 'message' : 'messages'}</span>
-                  <button
-                    className="delete-button"
-                    disabled={deletingDomain !== null || deletingSender !== null}
-                    onClick={() => void deleteDomainMessages(domain, messageCount)}
-                  >
-                    {deletingDomain === domain ? 'Moving…' : 'Move all to Trash'}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-          {deleteError && <p className="inline-error" role="alert">{deleteError}</p>}
-        </section>
-      )}
+      {success && <p className="inline-success" role="status">{success}</p>}
+      {error && <p className="inline-error" role="alert">{error}</p>}
 
-      <section className="inbox">
+      <section className="senders">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Stored metadata</p>
-            <h2>Recent messages</h2>
+            <p className="eyebrow">Sender breakdown</p>
+            <h2>Sender vs count</h2>
           </div>
-          <button className="text-button" onClick={() => {
-            void loadMessages()
-            void loadSenders()
-            void loadDomains()
-          }}>
-            Refresh
-          </button>
         </div>
 
-        {loading && <div className="state">Loading stored messages…</div>}
-        {!loading && error && (
-          <div className="state error">
-            <p>{error}</p>
-            <a href="/oauth2/authorization/google">Connect Gmail</a>
-          </div>
+        {loading && <div className="state">Loading sender counts…</div>}
+        {!loading && !error && senders.length === 0 && (
+          <div className="state">No stored messages yet. Connect Gmail and sync the mailbox.</div>
         )}
-        {!loading && !error && messages.length === 0 && (
-          <div className="state">No stored messages yet. Connect Gmail and run a sync.</div>
+        {!loading && senders.length > 0 && (
+          <>
+            <div className="sender-list">
+              {senders.map(({ sender, messageCount }) => (
+                <article className="sender-row" key={sender}>
+                  <div className="avatar">{senderInitial(sender)}</div>
+                  <strong>{sender}</strong>
+                  <div className="sender-actions">
+                    <span>{messageCount}</span>
+                    <button
+                      className="delete-button"
+                      disabled={deletingSender !== null}
+                      onClick={() => void deleteSenderMessages(sender, messageCount)}
+                    >
+                      {deletingSender === sender ? 'Moving…' : 'Move all to Trash'}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <nav className="pagination" aria-label="Sender pages">
+              <button
+                className="button secondary"
+                disabled={loading || !senderPageInfo?.hasPrevious}
+                onClick={() => setSenderPage((page) => page - 1)}
+              >
+                Previous
+              </button>
+              <span>
+                Page {senderPage + 1} of {senderPageInfo?.totalPages ?? 1}
+                {' · '}{senderPageInfo?.totalSenders.toLocaleString()} senders
+              </span>
+              <button
+                className="button secondary"
+                disabled={loading || !senderPageInfo?.hasNext}
+                onClick={() => setSenderPage((page) => page + 1)}
+              >
+                Next 15
+              </button>
+            </nav>
+          </>
         )}
-        {!loading && !error && messages.length > 0 && (
-          <div className="message-list">
-            {messages.map((message) => (
-              <article className="message" key={message.id}>
-                <div className="avatar">{senderInitial(message.from)}</div>
-                <div className="message-copy">
-                  <strong>{message.from ?? 'Unknown sender'}</strong>
-                  <span>{message.subject || '(No subject)'}</span>
-                </div>
-                <div className="message-meta">
-                  <time>{formatDate(message.receivedAt)}</time>
-                  <span>{formatBytes(message.sizeEstimate ?? 0)}</span>
-                  <button
-                    className="message-delete-button"
-                    disabled={deletingMessageId !== null || deletingSender !== null}
-                    onClick={() => void deleteMessage(message)}
-                  >
-                    {deletingMessageId === message.id ? 'Moving…' : 'Delete'}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-        {deleteError && <p className="inline-error" role="alert">{deleteError}</p>}
       </section>
     </main>
   )
 }
 
-function senderInitial(sender: string | null) {
-  return sender?.trim().charAt(0).toUpperCase() || '?'
+function senderInitial(sender: string) {
+  return sender.trim().charAt(0).toUpperCase() || '?'
 }
 
-function StorageCard({ storage, error }: { storage: StorageBreakdown | null; error: string | null }) {
-  if (!storage) {
-    return (
-      <section className="storage-card">
-        <p className="eyebrow">Google storage</p>
-        <h2>Storage overview</h2>
-        <p className="storage-unavailable">{error ?? 'Loading storage…'}</p>
-      </section>
-    )
-  }
-
-  const total = storage.limitBytes ?? storage.usedBytes
-  const percent = (value: number) => total > 0 ? (value / total) * 100 : 0
-  const mailEnd = percent(storage.syncedMailBytes)
-  const driveEnd = mailEnd + percent(storage.driveBytes)
-  const otherEnd = driveEnd + percent(storage.photosAndOtherBytes)
-  const chart = {
-    background: `conic-gradient(
-      #367a50 0 ${mailEnd}%,
-      #79a98a ${mailEnd}% ${driveEnd}%,
-      #d2a95f ${driveEnd}% ${otherEnd}%,
-      #e6ece7 ${otherEnd}% 100%
-    )`,
-  }
-
+function SyncMetric({ value, label }: { value: string; label: string }) {
   return (
-    <section className="storage-card">
-      <p className="eyebrow">Google storage</p>
-      <div className="storage-content">
-        <div className="donut" style={chart}>
-          <div>
-            <strong>{formatBytes(storage.usedBytes)}</strong>
-            <span>of {storage.limitBytes ? formatBytes(storage.limitBytes) : 'unlimited'}</span>
-          </div>
-        </div>
-        <ul className="storage-legend">
-          <StorageLegend color="mail" label="Synced mail" bytes={storage.syncedMailBytes} />
-          <StorageLegend color="drive" label="Drive" bytes={storage.driveBytes} />
-          <StorageLegend color="other" label="Photos & other" bytes={storage.photosAndOtherBytes} />
-          <StorageLegend color="free" label="Free" bytes={storage.freeBytes ?? 0} />
-        </ul>
-      </div>
-    </section>
-  )
-}
-
-function StorageLegend({ color, label, bytes }: { color: string; label: string; bytes: number }) {
-  return (
-    <li>
-      <i className={color} />
+    <div>
+      <strong>{value}</strong>
       <span>{label}</span>
-      <strong>{formatBytes(bytes)}</strong>
-    </li>
+    </div>
   )
 }
 
-function formatDate(value: string | null) {
-  if (!value) return 'Unknown date'
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value))
-}
-
-function formatBytes(bytes: number) {
-  if (bytes === 0) return '0 B'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  if (bytes < 1024 ** 4) return `${(bytes / (1024 ** 3)).toFixed(1)} GB`
-  return `${(bytes / (1024 ** 4)).toFixed(1)} TB`
+function formatDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  return minutes > 0
+    ? `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+    : `${remainingSeconds}s`
 }
 
 export default App

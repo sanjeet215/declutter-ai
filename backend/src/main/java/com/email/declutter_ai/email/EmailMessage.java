@@ -43,13 +43,13 @@ public class EmailMessage {
 	@Column(name = "sender", length = 1000)
 	private String sender;
 
-	@Column(name = "recipient_to", length = 4000)
+	@Column(name = "recipient_to", columnDefinition = "text")
 	private String recipientTo;
 
-	@Column(name = "recipient_cc", length = 4000)
+	@Column(name = "recipient_cc", columnDefinition = "text")
 	private String recipientCc;
 
-	@Column(name = "recipient_bcc", length = 4000)
+	@Column(name = "recipient_bcc", columnDefinition = "text")
 	private String recipientBcc;
 
 	@Column(length = 2000)
@@ -82,19 +82,28 @@ public class EmailMessage {
 	}
 
 	public void updateFrom(EmailMetadata metadata, Instant syncTime) {
-		gmailThreadId = metadata.threadId();
-		internetMessageId = metadata.internetMessageId();
-		sender = metadata.from();
-		recipientTo = metadata.to();
-		recipientCc = metadata.cc();
-		recipientBcc = metadata.bcc();
-		subject = metadata.subject();
-		dateHeader = metadata.dateHeader();
+		gmailThreadId = truncate(metadata.threadId(), 64);
+		internetMessageId = truncate(metadata.internetMessageId(), 1000);
+		sender = truncate(metadata.from(), 1000);
+		recipientTo = truncate(metadata.to(), 4000);
+		recipientCc = truncate(metadata.cc(), 4000);
+		recipientBcc = truncate(metadata.bcc(), 4000);
+		subject = truncate(metadata.subject(), 2000);
+		dateHeader = truncate(metadata.dateHeader(), 255);
 		receivedAt = metadata.receivedAt();
 		sizeEstimate = metadata.sizeEstimate();
 		labels.clear();
-		labels.addAll(metadata.labelIds());
+		metadata.labelIds().stream()
+				.map(label -> truncate(label, 255))
+				.forEach(labels::add);
 		syncedAt = syncTime;
+	}
+
+	private static String truncate(String value, int maxCharacters) {
+		if (value == null || value.codePointCount(0, value.length()) <= maxCharacters) {
+			return value;
+		}
+		return value.substring(0, value.offsetByCodePoints(0, maxCharacters));
 	}
 
 	public Long getId() {

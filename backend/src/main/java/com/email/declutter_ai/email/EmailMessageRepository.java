@@ -37,6 +37,26 @@ public interface EmailMessageRepository extends JpaRepository<EmailMessage, Long
 	List<SenderMessageCount> findSenderMessageCounts(
 			@Param("accountEmail") String accountEmail);
 
+	@Query(value = """
+			select new com.email.declutter_ai.email.SenderMessageCount(
+				message.sender, count(message)
+			)
+			from EmailMessage message
+			where message.accountEmail = :accountEmail
+				and message.sender is not null
+				and trim(message.sender) <> ''
+			group by message.sender
+			order by count(message) desc, message.sender asc
+			""", countQuery = """
+			select count(distinct message.sender)
+			from EmailMessage message
+			where message.accountEmail = :accountEmail
+				and message.sender is not null
+				and trim(message.sender) <> ''
+			""")
+	Page<SenderMessageCount> findSenderMessageCountsPage(
+			@Param("accountEmail") String accountEmail, Pageable pageable);
+
 	List<EmailMessage> findByAccountEmailAndSender(
 			String accountEmail, String sender);
 

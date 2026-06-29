@@ -19,7 +19,7 @@ public class GmailClient {
 			"From", "To", "Cc", "Bcc", "Subject", "Date", "Message-ID"
 	};
 	private static final int MAX_CONCURRENT_METADATA_REQUESTS = 10;
-	private static final int GMAIL_MAX_PAGE_SIZE = 500;
+	public static final int GMAIL_MAX_PAGE_SIZE = 500;
 	private static final Pattern EMAIL_IN_ANGLE_BRACKETS =
 			Pattern.compile("<\\s*([^<>\\s]+@[^<>\\s]+)\\s*>");
 

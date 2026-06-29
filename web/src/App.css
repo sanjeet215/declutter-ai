@@ -96,6 +96,127 @@ h1 {
   border-color: #d8e0da;
 }
 
+.sync-status {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 22px 24px 26px;
+  border: 1px solid #cfe0d4;
+  border-radius: 18px;
+  background: rgba(248, 253, 249, 0.96);
+  box-shadow: 0 18px 50px rgba(36, 70, 48, 0.08);
+}
+
+.sync-status.is-complete {
+  border-color: #b9ddc4;
+  background: #f1faf4;
+}
+
+.sync-status.is-failed {
+  border-color: #e5c5c5;
+  background: #fff8f8;
+}
+
+.sync-indicator {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e2f1e7;
+}
+
+.sync-spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid #afd0ba;
+  border-top-color: #245f3d;
+  border-radius: 50%;
+  animation: sync-spin 0.8s linear infinite;
+}
+
+.sync-check {
+  color: #245f3d;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.sync-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sync-copy strong {
+  color: #183923;
+  font-size: 16px;
+}
+
+.sync-copy span {
+  color: #68766d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.sync-numbers {
+  display: flex;
+  gap: 24px;
+}
+
+.sync-numbers div {
+  display: flex;
+  min-width: 72px;
+  flex-direction: column;
+}
+
+.sync-numbers strong {
+  color: #183923;
+  font-size: 20px;
+  letter-spacing: -0.03em;
+}
+
+.sync-numbers span {
+  color: #78847c;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.sync-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 4px;
+  background: #dfebe3;
+}
+
+.sync-progress span {
+  display: block;
+  width: 35%;
+  height: 100%;
+  border-radius: 999px;
+  background: #39875a;
+  animation: sync-progress 1.5s ease-in-out infinite;
+}
+
+.sync-progress span.is-determinate {
+  transition: width 0.35s ease;
+  animation: none;
+}
+
+@keyframes sync-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes sync-progress {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(315%); }
+}
+
 .overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 370px;
@@ -315,6 +436,20 @@ h1 {
   white-space: nowrap;
 }
 
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.pagination span {
+  color: #6c7970;
+  font-size: 13px;
+  text-align: center;
+}
+
 .delete-button {
   min-width: 124px;
   padding: 7px 12px;
@@ -456,6 +591,16 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .sync-status {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .sync-numbers {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
   .overview-grid {
     grid-template-columns: 1fr;
   }
@@ -478,7 +623,23 @@ h1 {
     justify-content: space-between;
   }
 
+  .pagination {
+    flex-wrap: wrap;
+  }
+
+  .pagination span {
+    order: -1;
+    width: 100%;
+  }
+
   .message-meta {
     display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sync-spinner,
+  .sync-progress span {
+    animation-duration: 3s;
   }
 }
