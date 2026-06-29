@@ -10,6 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.email.declutter_ai.gmail.GmailClient;
 import com.email.declutter_ai.gmail.GmailClient.MessagePage;
+import com.email.declutter_ai.rules.RuleEngineService;
+import com.email.declutter_ai.settings.AppParameterService;
 
 @Service
 public class EmailSyncService {
@@ -20,14 +22,20 @@ public class EmailSyncService {
 	private final GmailClient gmailClient;
 	private final EmailMessageRepository repository;
 	private final SpammerEmailRepository spammerEmailRepository;
+	private final RuleEngineService ruleEngineService;
+	private final AppParameterService appParameterService;
 
 	public EmailSyncService(
 			GmailClient gmailClient,
 			EmailMessageRepository repository,
-			SpammerEmailRepository spammerEmailRepository) {
+			SpammerEmailRepository spammerEmailRepository,
+			RuleEngineService ruleEngineService,
+			AppParameterService appParameterService) {
 		this.gmailClient = gmailClient;
 		this.repository = repository;
 		this.spammerEmailRepository = spammerEmailRepository;
+		this.ruleEngineService = ruleEngineService;
+		this.appParameterService = appParameterService;
 	}
 
 	@Transactional
@@ -51,6 +59,18 @@ public class EmailSyncService {
 				created++;
 			}
 			message.updateFrom(metadata, syncTime);
+			var classification = ruleEngineService.classify(accountEmail, message);
+			message.applyClassification(
+					classification.category(),
+					classification.comment(),
+					classification.canDelete(),
+					classification.ruleName());
+			if (classification.canDelete()
+					&& appParameterService.autoDeleteRecommended(accountEmail)) {
+				gmailClient.trashMessage(accessToken, metadata.id());
+				existing.ifPresent(repository::delete);
+				continue;
+			}
 			repository.save(message);
 		}
 

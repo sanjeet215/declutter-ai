@@ -99,6 +99,25 @@ public class EmailMessageController {
 				result.hasPrevious());
 	}
 
+	@GetMapping("/sender-details")
+	SenderDetails senderDetails(
+			@AuthenticationPrincipal OidcUser user,
+			@RequestParam String sender,
+			@RequestParam(defaultValue = "0") @Min(0) int page,
+			@RequestParam(defaultValue = "50") @Min(1) @Max(100) int size) {
+		var result = emailMessageRepository
+				.findByAccountEmailAndSenderOrderByReceivedAtDesc(
+						user.getEmail(), sender, PageRequest.of(page, size));
+		return new SenderDetails(
+				sender,
+				result.getTotalElements(),
+				result.getContent().stream().map(SenderMessageDetail::from).toList(),
+				result.getNumber(),
+				result.getTotalPages(),
+				result.hasNext(),
+				result.hasPrevious());
+	}
+
 	@GetMapping("/domains")
 	List<DomainMessageCount> domains(@AuthenticationPrincipal OidcUser user) {
 		return emailMessageRepository.findSenderMessageCounts(user.getEmail())
@@ -180,5 +199,20 @@ public class EmailMessageController {
 			long totalSenders,
 			boolean hasNext,
 			boolean hasPrevious) {
+	}
+
+	record SenderDetails(String sender, long messageCount,
+			List<SenderMessageDetail> messages, int page, int totalPages,
+			boolean hasNext, boolean hasPrevious) {
+	}
+
+	record SenderMessageDetail(Long id, String subject, Instant receivedAt,
+			String category, String comment, boolean canDelete, String matchedRule) {
+		static SenderMessageDetail from(EmailMessage message) {
+			return new SenderMessageDetail(
+					message.getId(), message.getSubject(), message.getReceivedAt(),
+					message.getRuleCategory(), message.getRuleComment(),
+					message.isCanDelete(), message.getMatchedRule());
+		}
 	}
 }

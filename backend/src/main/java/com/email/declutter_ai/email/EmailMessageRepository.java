@@ -60,6 +60,9 @@ public interface EmailMessageRepository extends JpaRepository<EmailMessage, Long
 	List<EmailMessage> findByAccountEmailAndSender(
 			String accountEmail, String sender);
 
+	Page<EmailMessage> findByAccountEmailAndSenderOrderByReceivedAtDesc(
+			String accountEmail, String sender, Pageable pageable);
+
 	Optional<EmailMessage> findByIdAndAccountEmail(
 			Long id, String accountEmail);
 

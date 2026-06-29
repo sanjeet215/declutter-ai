@@ -23,4 +23,18 @@ public class FrontendController {
 				.location(frontendUri)
 				.build();
 	}
+
+	@GetMapping("/classification")
+	ResponseEntity<Void> classification() {
+		return ResponseEntity.status(HttpStatus.FOUND)
+				.location(frontendUri.resolve("/classification"))
+				.build();
+	}
+
+	@GetMapping("/sender")
+	ResponseEntity<Void> sender() {
+		return ResponseEntity.status(HttpStatus.FOUND)
+				.location(frontendUri.resolve("/sender"))
+				.build();
+	}
 }

@@ -73,6 +73,18 @@ public class EmailMessage {
 	@Column(name = "synced_at", nullable = false)
 	private Instant syncedAt;
 
+	@Column(name = "rule_category", length = 100)
+	private String ruleCategory;
+
+	@Column(name = "rule_comment", length = 1000)
+	private String ruleComment;
+
+	@Column(name = "can_delete")
+	private Boolean canDelete;
+
+	@Column(name = "matched_rule", length = 120)
+	private String matchedRule;
+
 	protected EmailMessage() {
 	}
 
@@ -104,6 +116,14 @@ public class EmailMessage {
 			return value;
 		}
 		return value.substring(0, value.offsetByCodePoints(0, maxCharacters));
+	}
+
+	public void applyClassification(String category, String comment,
+			boolean canDelete, String ruleName) {
+		this.ruleCategory = truncate(category, 100);
+		this.ruleComment = truncate(comment, 1000);
+		this.canDelete = canDelete;
+		this.matchedRule = truncate(ruleName, 120);
 	}
 
 	public Long getId() {
@@ -165,4 +185,9 @@ public class EmailMessage {
 	public Instant getSyncedAt() {
 		return syncedAt;
 	}
+
+	public String getRuleCategory() { return ruleCategory; }
+	public String getRuleComment() { return ruleComment; }
+	public boolean isCanDelete() { return Boolean.TRUE.equals(canDelete); }
+	public String getMatchedRule() { return matchedRule; }
 }

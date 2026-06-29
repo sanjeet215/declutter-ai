@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
 import './App.css'
 
 type SenderMessageCount = {
@@ -24,6 +25,28 @@ type DeleteResult = {
   deletedMessages: number
 }
 
+type Rule = { id: number; name: string; matchField: string; matchValue: string; category: string; comment: string; canDelete: boolean; subjectContains?: string; senderContains?: string; olderThanDays?: number }
+type RulesResponse = { baseRules: Rule[]; userRules: Rule[]; autoDeleteRecommended: boolean }
+const EMAIL_CATEGORIES = [
+  'Transaction Alert',
+  'Finance',
+  'Security Alert',
+  'Promotion',
+  'Newsletter',
+  'Shopping',
+  'Travel',
+  'Social',
+  'Personal',
+  'Work',
+  'Automated',
+  'General',
+] as const
+type SenderDetail = {
+  sender: string
+  messageCount: number
+  messages: Array<{ id: number; subject: string | null; receivedAt: string | null; category: string | null; comment: string | null; canDelete: boolean; matchedRule: string | null }>
+}
+
 type SyncStatus = {
   state: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED'
   processed: number
@@ -35,7 +58,7 @@ type SyncStatus = {
 
 let csrf: CsrfResponse | null = null
 
-const mutation = async (url: string, method: 'POST' | 'DELETE') => {
+const mutation = async (url: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown) => {
   if (!csrf) {
     const response = await fetch('/api/auth/csrf', {
       headers: { Accept: 'application/json' },
@@ -50,8 +73,10 @@ const mutation = async (url: string, method: 'POST' | 'DELETE') => {
     method,
     headers: {
       Accept: 'application/json',
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
       [csrfToken.headerName]: csrfToken.token,
     },
+    body: body ? JSON.stringify(body) : undefined,
   })
 }
 
@@ -68,6 +93,8 @@ const apiError = async (response: Response, fallback: string) => {
 }
 
 function App() {
+  const classificationPage = window.location.pathname === '/classification'
+  const senderDetailPage = window.location.pathname === '/sender'
   const [senders, setSenders] = useState<SenderMessageCount[]>([])
   const [senderPage, setSenderPage] = useState(0)
   const [senderPageInfo, setSenderPageInfo] = useState<SenderPage | null>(null)
@@ -78,6 +105,52 @@ function App() {
   const [deletingSender, setDeletingSender] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [rules, setRules] = useState<RulesResponse | null>(null)
+  const [ruleMessage, setRuleMessage] = useState<string | null>(null)
+  const [ruleError, setRuleError] = useState<string | null>(null)
+
+  const loadRules = async () => {
+    const response = await fetch('/api/rules', { headers: { Accept: 'application/json' } })
+    if (response.ok) setRules(await response.json())
+  }
+
+  const setAutoDelete = async (enabled: boolean) => {
+    const response = await mutation('/api/rules/settings/auto-delete', 'PUT', { enabled })
+    if (response.ok) setRules((current) => current ? { ...current, autoDeleteRecommended: enabled } : current)
+  }
+
+  const createRule = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    setRuleMessage(null)
+    setRuleError(null)
+    const optional = (name: string) => {
+      const value = form.get(name)?.toString().trim()
+      return value || null
+    }
+    const age = optional('olderThanDays')
+    const additionalConditions = [
+      { field: optional('condition2Field'), value: optional('condition2Value') },
+    ]
+    const conditionValue = (field: string) =>
+      additionalConditions.find((condition) => condition.field === field)?.value ?? null
+    const response = await mutation('/api/rules', 'POST', {
+      name: form.get('name'), matchField: form.get('matchField'),
+      matchValue: form.get('matchValue'), category: form.get('category'),
+      comment: form.get('comment'), canDelete: form.get('canDelete') === 'true', priority: 500,
+      subjectContains: conditionValue('SUBJECT'),
+      senderContains: conditionValue('SENDER'),
+      olderThanDays: form.get('ageOperator') === 'OLDER_THAN' && age ? Number(age) : null,
+    })
+    if (!response.ok) {
+      setRuleError(await apiError(response, 'Unable to add the rule.'))
+      return
+    }
+    formElement.reset()
+    await loadRules()
+    setRuleMessage('Rule added successfully.')
+  }
 
   const loadSenders = async (page = senderPage) => {
     setLoading(true)
@@ -176,8 +249,9 @@ function App() {
   }
 
   useEffect(() => {
-    void loadSenders(senderPage)
-  }, [senderPage])
+    if (classificationPage) void loadRules()
+    else if (!senderDetailPage) void loadSenders(senderPage)
+  }, [senderPage, classificationPage, senderDetailPage])
 
   useEffect(() => {
     if (!syncing) return
@@ -187,12 +261,28 @@ function App() {
     return () => window.clearInterval(timer)
   }, [syncing])
 
+  if (classificationPage) {
+    return (
+      <main>
+        <Topbar active="classification" />
+        <section className="hero classification-hero">
+          <p className="eyebrow">Classification</p>
+          <h1>Teach your inbox what matters.</h1>
+          <p className="lede">Create rules that categorize messages, explain the recommendation, and decide whether they can be deleted.</p>
+        </section>
+        <ClassificationPage rules={rules} setAutoDelete={setAutoDelete}
+          createRule={createRule} ruleMessage={ruleMessage} ruleError={ruleError} />
+      </main>
+    )
+  }
+
+  if (senderDetailPage) {
+    return <main><Topbar active="mailbox" /><SenderDetailPage /></main>
+  }
+
   return (
     <main>
-      <header className="topbar">
-        <a className="brand" href="/">Declutter<span>AI</span></a>
-        <a className="button secondary" href="/oauth2/authorization/google">Connect Gmail</a>
-      </header>
+      <Topbar active="mailbox" />
 
       <section className="hero">
         <p className="eyebrow">Mailbox overview</p>
@@ -284,7 +374,11 @@ function App() {
               {senders.map(({ sender, messageCount }) => (
                 <article className="sender-row" key={sender}>
                   <div className="avatar">{senderInitial(sender)}</div>
-                  <strong>{sender}</strong>
+                  <strong>
+                    <a className="sender-link" href={`/sender?${new URLSearchParams({ sender })}`}>
+                      {sender}
+                    </a>
+                  </strong>
                   <div className="sender-actions">
                     <span>{messageCount}</span>
                     <button
@@ -321,7 +415,140 @@ function App() {
           </>
         )}
       </section>
+
     </main>
+  )
+}
+
+function Topbar({ active }: { active: 'mailbox' | 'classification' }) {
+  return (
+    <header className="topbar">
+      <a className="brand" href="/">Declutter<span>AI</span></a>
+      <nav className="topnav">
+        <a className={active === 'mailbox' ? 'active' : ''} href="/">Mailbox</a>
+        <a className={active === 'classification' ? 'active' : ''} href="/classification">Classification</a>
+        <a className="button secondary" href="/oauth2/authorization/google">Connect Gmail</a>
+      </nav>
+    </header>
+  )
+}
+
+function ClassificationPage({ rules, setAutoDelete, createRule, ruleMessage, ruleError }: {
+  rules: RulesResponse | null
+  setAutoDelete: (enabled: boolean) => Promise<void>
+  createRule: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  ruleMessage: string | null
+  ruleError: string | null
+}) {
+  return (
+    <section className="classification-panel">
+      <div className="section-heading"><div><p className="eyebrow">Rule engine</p><h2>Classification rules</h2></div></div>
+        <label className="rule-toggle">
+          <input type="checkbox" checked={rules?.autoDeleteRecommended ?? false}
+            onChange={(event) => void setAutoDelete(event.target.checked)} />
+          Automatically trash messages recommended for deletion
+        </label>
+        <p className="rule-warning">Off by default. When enabled, matching mail is moved to Gmail Trash during sync.</p>
+        <form className="rule-form" onSubmit={(event) => void createRule(event)}>
+          <input name="name" placeholder="Rule name" required />
+          <select name="category" defaultValue="" required>
+            <option value="" disabled>Select category</option>
+            {EMAIL_CATEGORIES.map((category) => (
+              <option key={category} value={category}>{category}</option>
+            ))}
+          </select>
+          <select name="matchField"><option value="SENDER">Sender contains</option><option value="DOMAIN">Sender domain</option><option value="SUBJECT">Subject contains</option><option value="LABEL">Gmail label</option></select>
+          <input name="matchValue" placeholder="Match value" required />
+          <select name="condition2Field" defaultValue="SUBJECT">
+            <option value="">No additional condition</option>
+            <option value="SUBJECT">AND subject contains</option>
+            <option value="SENDER">AND sender contains</option>
+          </select>
+          <input name="condition2Value" placeholder="Condition text (optional)" />
+          <select name="ageOperator" defaultValue="ANY">
+            <option value="ANY">Any message age</option>
+            <option value="OLDER_THAN">Message older than</option>
+          </select>
+          <select name="olderThanDays" defaultValue="30">
+            <option value="7">7 days</option>
+            <option value="15">15 days</option>
+            <option value="30">30 days</option>
+            <option value="60">60 days</option>
+            <option value="90">90 days</option>
+            <option value="180">6 months</option>
+            <option value="365">1 year</option>
+          </select>
+          <input name="comment" placeholder="Comment shown for matches" required />
+          <select name="canDelete" defaultValue="false">
+            <option value="false">Keep / review</option>
+            <option value="true">Can delete</option>
+          </select>
+          <button className="button primary rule-submit" type="submit">Add rule</button>
+        </form>
+        {ruleMessage && <p className="inline-success" role="status">{ruleMessage}</p>}
+        {ruleError && <p className="inline-error" role="alert">{ruleError}</p>}
+        <div className="rule-list">
+          {[...(rules?.userRules ?? []), ...(rules?.baseRules ?? [])].map((rule) => (
+            <article key={`${rule.id}-${rule.name}`}>
+              <strong>{rule.name}</strong><span>{rule.matchField}: {rule.matchValue}</span>
+              {rule.subjectContains && <span>AND subject contains: {rule.subjectContains}</span>}
+              {rule.senderContains && <span>AND sender contains: {rule.senderContains}</span>}
+              {rule.olderThanDays && <span>AND older than: {rule.olderThanDays} days</span>}
+              <span>{rule.category} · {rule.canDelete ? 'Can delete' : 'Keep/review'}</span>
+              <p>{rule.comment}</p>
+            </article>
+          ))}
+        </div>
+    </section>
+  )
+}
+
+function SenderDetailPage() {
+  const sender = new URLSearchParams(window.location.search).get('sender') ?? ''
+  const [detail, setDetail] = useState<SenderDetail | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const load = async () => {
+      const response = await fetch(`/api/emails/sender-details?${new URLSearchParams({ sender })}`, {
+        headers: { Accept: 'application/json' },
+      })
+      if (!response.ok) {
+        setDetailError(await apiError(response, 'Unable to load sender details.'))
+        return
+      }
+      setDetail(await response.json())
+    }
+    void load()
+  }, [sender])
+
+  return (
+    <>
+      <section className="hero detail-hero">
+        <p className="eyebrow">Sender details</p>
+        <h1>{sender || 'Unknown sender'}</h1>
+        <p className="lede">{detail ? `${detail.messageCount.toLocaleString()} stored messages` : 'Loading classification details…'}</p>
+        <a className="text-button back-link" href="/">← Back to senders</a>
+      </section>
+      {detailError && <p className="inline-error">{detailError}</p>}
+      <section className="classification-list">
+        {detail?.messages.map((message) => (
+          <article key={message.id}>
+            <div className="classification-heading">
+              <div><strong>{message.subject || '(No subject)'}</strong><span>{formatDate(message.receivedAt)}</span></div>
+              <span className={`recommendation ${message.canDelete ? 'delete' : 'keep'}`}>
+                {message.canDelete ? 'Can delete' : 'Keep / review'}
+              </span>
+            </div>
+            <dl>
+              <div><dt>Category</dt><dd>{message.category || 'Uncategorized'}</dd></div>
+              <div><dt>Matched rule</dt><dd>{message.matchedRule || 'No matching rule'}</dd></div>
+            </dl>
+            <p>{message.comment || 'No classification comment available.'}</p>
+          </article>
+        ))}
+      </section>
+    </>
   )
 }
 
@@ -344,6 +571,10 @@ function formatDuration(seconds: number) {
   return minutes > 0
     ? `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
     : `${remainingSeconds}s`
+}
+
+function formatDate(value: string | null) {
+  return value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : 'Unknown date'
 }
 
 export default App
