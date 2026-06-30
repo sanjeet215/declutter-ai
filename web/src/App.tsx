@@ -25,7 +25,8 @@ type DeleteResult = {
   deletedMessages: number
 }
 
-type Rule = { id: number; name: string; matchField: string; matchValue: string; category: string; comment: string; canDelete: boolean; subjectContains?: string; senderContains?: string; olderThanDays?: number }
+type Decision = 'KEEP_IT' | 'SAFE_TO_DELETE' | 'REVIEW'
+type Rule = { id: number; name: string; matchField: string; matchValue: string; category: string; comment: string; canDelete: boolean; decision: Decision; subjectContains?: string; senderContains?: string; olderThanDays?: number }
 type RulesResponse = { baseRules: Rule[]; userRules: Rule[]; autoDeleteRecommended: boolean }
 const EMAIL_CATEGORIES = [
   'Transaction Alert',
@@ -44,7 +45,15 @@ const EMAIL_CATEGORIES = [
 type SenderDetail = {
   sender: string
   messageCount: number
-  messages: Array<{ id: number; subject: string | null; receivedAt: string | null; category: string | null; comment: string | null; canDelete: boolean; matchedRule: string | null }>
+  safeToDeleteCount: number
+  keepCount: number
+  reviewCount: number
+  recoverableBytes: number
+  page: number
+  totalPages: number
+  hasNext: boolean
+  hasPrevious: boolean
+  messages: Array<{ id: number; subject: string | null; receivedAt: string | null; sizeEstimate: number | null; category: string | null; comment: string | null; canDelete: boolean; decision: Decision; matchedRule: string | null }>
 }
 
 type SyncStatus = {
@@ -108,6 +117,7 @@ function App() {
   const [rules, setRules] = useState<RulesResponse | null>(null)
   const [ruleMessage, setRuleMessage] = useState<string | null>(null)
   const [ruleError, setRuleError] = useState<string | null>(null)
+  const [editingRule, setEditingRule] = useState<Rule | null>(null)
 
   const loadRules = async () => {
     const response = await fetch('/api/rules', { headers: { Accept: 'application/json' } })
@@ -117,6 +127,39 @@ function App() {
   const setAutoDelete = async (enabled: boolean) => {
     const response = await mutation('/api/rules/settings/auto-delete', 'PUT', { enabled })
     if (response.ok) setRules((current) => current ? { ...current, autoDeleteRecommended: enabled } : current)
+  }
+
+  const deleteRule = async (rule: Rule) => {
+    if (!window.confirm(`Delete the rule "${rule.name}"?`)) return
+    setRuleMessage(null)
+    setRuleError(null)
+    try {
+      const response = await mutation(`/api/rules/${rule.id}`, 'DELETE')
+      if (!response.ok) {
+        setRuleError(await apiError(response, 'Unable to delete the rule.'))
+        return
+      }
+      await loadRules()
+      setRuleMessage('Rule deleted successfully.')
+    } catch (caught) {
+      setRuleError(caught instanceof Error ? caught.message : 'Unable to delete the rule.')
+    }
+  }
+
+  const reapplyRules = async () => {
+    setRuleMessage(null)
+    setRuleError(null)
+    try {
+      const response = await mutation('/api/rules/reapply', 'POST')
+      if (!response.ok) {
+        setRuleError(await apiError(response, 'Unable to reapply rules.'))
+        return
+      }
+      const result = await response.json()
+      setRuleMessage(`Reclassified ${result.reclassifiedMessages.toLocaleString()} messages.`)
+    } catch (caught) {
+      setRuleError(caught instanceof Error ? caught.message : 'Unable to reapply rules.')
+    }
   }
 
   const createRule = async (event: FormEvent<HTMLFormElement>) => {
@@ -135,10 +178,12 @@ function App() {
     ]
     const conditionValue = (field: string) =>
       additionalConditions.find((condition) => condition.field === field)?.value ?? null
-    const response = await mutation('/api/rules', 'POST', {
+    const response = await mutation(
+      editingRule ? `/api/rules/${editingRule.id}` : '/api/rules',
+      editingRule ? 'PUT' : 'POST', {
       name: form.get('name'), matchField: form.get('matchField'),
       matchValue: form.get('matchValue'), category: form.get('category'),
-      comment: form.get('comment'), canDelete: form.get('canDelete') === 'true', priority: 500,
+      comment: form.get('comment'), decision: form.get('decision'), priority: 500,
       subjectContains: conditionValue('SUBJECT'),
       senderContains: conditionValue('SENDER'),
       olderThanDays: form.get('ageOperator') === 'OLDER_THAN' && age ? Number(age) : null,
@@ -148,8 +193,9 @@ function App() {
       return
     }
     formElement.reset()
+    setEditingRule(null)
     await loadRules()
-    setRuleMessage('Rule added successfully.')
+    setRuleMessage(editingRule ? 'Rule updated successfully.' : 'Rule added successfully.')
   }
 
   const loadSenders = async (page = senderPage) => {
@@ -271,7 +317,10 @@ function App() {
           <p className="lede">Create rules that categorize messages, explain the recommendation, and decide whether they can be deleted.</p>
         </section>
         <ClassificationPage rules={rules} setAutoDelete={setAutoDelete}
-          createRule={createRule} ruleMessage={ruleMessage} ruleError={ruleError} />
+          createRule={createRule} deleteRule={deleteRule}
+          reapplyRules={reapplyRules}
+          editingRule={editingRule} setEditingRule={setEditingRule}
+          ruleMessage={ruleMessage} ruleError={ruleError} />
       </main>
     )
   }
@@ -433,43 +482,56 @@ function Topbar({ active }: { active: 'mailbox' | 'classification' }) {
   )
 }
 
-function ClassificationPage({ rules, setAutoDelete, createRule, ruleMessage, ruleError }: {
+function ClassificationPage({ rules, setAutoDelete, createRule, deleteRule,
+  reapplyRules, editingRule, setEditingRule, ruleMessage, ruleError }: {
   rules: RulesResponse | null
   setAutoDelete: (enabled: boolean) => Promise<void>
   createRule: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  deleteRule: (rule: Rule) => Promise<void>
+  reapplyRules: () => Promise<void>
+  editingRule: Rule | null
+  setEditingRule: (rule: Rule | null) => void
   ruleMessage: string | null
   ruleError: string | null
 }) {
   return (
     <section className="classification-panel">
-      <div className="section-heading"><div><p className="eyebrow">Rule engine</p><h2>Classification rules</h2></div></div>
+      <div className="section-heading">
+        <div><p className="eyebrow">Rule engine</p><h2>Classification rules</h2></div>
+        <button className="button secondary" type="button"
+          onClick={() => void reapplyRules()}>Reapply rules</button>
+      </div>
         <label className="rule-toggle">
           <input type="checkbox" checked={rules?.autoDeleteRecommended ?? false}
             onChange={(event) => void setAutoDelete(event.target.checked)} />
           Automatically trash messages recommended for deletion
         </label>
         <p className="rule-warning">Off by default. When enabled, matching mail is moved to Gmail Trash during sync.</p>
-        <form className="rule-form" onSubmit={(event) => void createRule(event)}>
-          <input name="name" placeholder="Rule name" required />
-          <select name="category" defaultValue="" required>
+        <form className="rule-form" key={editingRule?.id ?? 'new'}
+          onSubmit={(event) => void createRule(event)}>
+          <input name="name" placeholder="Rule name" defaultValue={editingRule?.name ?? ''} required />
+          <select name="category" defaultValue={editingRule?.category ?? ''} required>
             <option value="" disabled>Select category</option>
             {EMAIL_CATEGORIES.map((category) => (
               <option key={category} value={category}>{category}</option>
             ))}
           </select>
-          <select name="matchField"><option value="SENDER">Sender contains</option><option value="DOMAIN">Sender domain</option><option value="SUBJECT">Subject contains</option><option value="LABEL">Gmail label</option></select>
-          <input name="matchValue" placeholder="Match value" required />
-          <select name="condition2Field" defaultValue="SUBJECT">
+          <select name="matchField" defaultValue={editingRule?.matchField ?? 'SENDER'}><option value="SENDER">Sender contains</option><option value="DOMAIN">Sender domain</option><option value="SUBJECT">Subject contains</option><option value="LABEL">Gmail label</option></select>
+          <input name="matchValue" placeholder="Match value" defaultValue={editingRule?.matchValue ?? ''} required />
+          <select name="condition2Field" defaultValue={
+            editingRule?.subjectContains ? 'SUBJECT' : editingRule?.senderContains ? 'SENDER' : 'SUBJECT'
+          }>
             <option value="">No additional condition</option>
             <option value="SUBJECT">AND subject contains</option>
             <option value="SENDER">AND sender contains</option>
           </select>
-          <input name="condition2Value" placeholder="Condition text (optional)" />
-          <select name="ageOperator" defaultValue="ANY">
+          <input name="condition2Value" placeholder="Condition text (optional)"
+            defaultValue={editingRule?.subjectContains ?? editingRule?.senderContains ?? ''} />
+          <select name="ageOperator" defaultValue={editingRule?.olderThanDays ? 'OLDER_THAN' : 'ANY'}>
             <option value="ANY">Any message age</option>
             <option value="OLDER_THAN">Message older than</option>
           </select>
-          <select name="olderThanDays" defaultValue="30">
+          <select name="olderThanDays" defaultValue={editingRule?.olderThanDays?.toString() ?? '30'}>
             <option value="7">7 days</option>
             <option value="15">15 days</option>
             <option value="30">30 days</option>
@@ -478,23 +540,55 @@ function ClassificationPage({ rules, setAutoDelete, createRule, ruleMessage, rul
             <option value="180">6 months</option>
             <option value="365">1 year</option>
           </select>
-          <input name="comment" placeholder="Comment shown for matches" required />
-          <select name="canDelete" defaultValue="false">
-            <option value="false">Keep / review</option>
-            <option value="true">Can delete</option>
+          <input name="comment" placeholder="Comment shown for matches"
+            defaultValue={editingRule?.comment ?? ''} required />
+          <select name="decision" defaultValue={editingRule?.decision ?? 'REVIEW'}>
+            <option value="KEEP_IT">Keep it</option>
+            <option value="SAFE_TO_DELETE">Safe to delete</option>
+            <option value="REVIEW">Review</option>
           </select>
-          <button className="button primary rule-submit" type="submit">Add rule</button>
+          <button className="button primary rule-submit" type="submit">
+            {editingRule ? 'Save changes' : 'Add rule'}
+          </button>
+          {editingRule && <button className="button secondary rule-submit" type="button"
+            onClick={() => setEditingRule(null)}>Cancel editing</button>}
         </form>
         {ruleMessage && <p className="inline-success" role="status">{ruleMessage}</p>}
         {ruleError && <p className="inline-error" role="alert">{ruleError}</p>}
         <div className="rule-list">
-          {[...(rules?.userRules ?? []), ...(rules?.baseRules ?? [])].map((rule) => (
+          {(rules?.userRules ?? []).map((rule) => (
             <article key={`${rule.id}-${rule.name}`}>
-              <strong>{rule.name}</strong><span>{rule.matchField}: {rule.matchValue}</span>
+              <div className="rule-card-heading">
+                <strong>{rule.name}</strong>
+                <div className="rule-card-actions">
+                  <button className="edit-button" type="button"
+                    onClick={() => { setEditingRule(rule); window.scrollTo({ top: 300, behavior: 'smooth' }) }}>Edit</button>
+                  <button className="delete-button" type="button"
+                    onClick={() => void deleteRule(rule)}>Delete rule</button>
+                </div>
+              </div>
+              <span>{rule.matchField}: {rule.matchValue}</span>
               {rule.subjectContains && <span>AND subject contains: {rule.subjectContains}</span>}
               {rule.senderContains && <span>AND sender contains: {rule.senderContains}</span>}
               {rule.olderThanDays && <span>AND older than: {rule.olderThanDays} days</span>}
-              <span>{rule.category} · {rule.canDelete ? 'Can delete' : 'Keep/review'}</span>
+              <span>{rule.category} · {formatDecision(rule.decision)}</span>
+              <p>{rule.comment}</p>
+            </article>
+          ))}
+          {(rules?.baseRules ?? []).map((rule) => (
+            <article key={`${rule.id}-${rule.name}`}>
+              <div className="rule-card-heading">
+                <strong>{rule.name}</strong>
+                <div className="rule-card-actions">
+                  <span className="base-rule-badge">Built in</span>
+                  <button className="edit-button" type="button"
+                    onClick={() => { setEditingRule(rule); window.scrollTo({ top: 300, behavior: 'smooth' }) }}>Edit</button>
+                  <button className="delete-button" type="button"
+                    onClick={() => void deleteRule(rule)}>Delete rule</button>
+                </div>
+              </div>
+              <span>{rule.matchField}: {rule.matchValue}</span>
+              <span>{rule.category} · {formatDecision(rule.decision)}</span>
               <p>{rule.comment}</p>
             </article>
           ))}
@@ -504,13 +598,22 @@ function ClassificationPage({ rules, setAutoDelete, createRule, ruleMessage, rul
 }
 
 function SenderDetailPage() {
-  const sender = new URLSearchParams(window.location.search).get('sender') ?? ''
+  const search = new URLSearchParams(window.location.search)
+  const sender = search.get('sender') ?? ''
+  const decision = search.get('decision') as Decision | null
+  const [messagePage, setMessagePage] = useState(0)
   const [detail, setDetail] = useState<SenderDetail | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
 
   useEffect(() => {
     const load = async () => {
-      const response = await fetch(`/api/emails/sender-details?${new URLSearchParams({ sender })}`, {
+      const query = new URLSearchParams({
+        sender,
+        page: messagePage.toString(),
+        size: '20',
+      })
+      if (decision) query.set('decision', decision)
+      const response = await fetch(`/api/emails/sender-details?${query}`, {
         headers: { Accept: 'application/json' },
       })
       if (!response.ok) {
@@ -520,34 +623,86 @@ function SenderDetailPage() {
       setDetail(await response.json())
     }
     void load()
-  }, [sender])
+  }, [sender, decision, messagePage])
+
+  const filterUrl = (filterDecision?: Decision) => {
+    const query = new URLSearchParams({ sender })
+    if (filterDecision) query.set('decision', filterDecision)
+    return `/sender?${query}`
+  }
 
   return (
     <>
       <section className="hero detail-hero">
         <p className="eyebrow">Sender details</p>
         <h1>{sender || 'Unknown sender'}</h1>
-        <p className="lede">{detail ? `${detail.messageCount.toLocaleString()} stored messages` : 'Loading classification details…'}</p>
+        <p className="lede">
+          {detail
+            ? `${detail.messageCount.toLocaleString()} stored messages${
+              decision ? ` · Showing ${formatDecision(decision)}` : ''}`
+            : 'Loading classification details…'}
+        </p>
         <a className="text-button back-link" href="/">← Back to senders</a>
       </section>
       {detailError && <p className="inline-error">{detailError}</p>}
+      {detail && (
+        <section className="sender-decision-summary" aria-label="Cleanup recommendation">
+          <div className="decision-summary-copy">
+            <p className="eyebrow">Cleanup recommendation</p>
+            <h2>Your rules have done the sorting.</h2>
+            <p>These totals include every stored message from this sender and respect age conditions in the matched rules.</p>
+          </div>
+          <div className="decision-metrics">
+            <a className="safe" href={filterUrl('SAFE_TO_DELETE')}>
+              <span>Safe to delete</span>
+              <strong>{detail.safeToDeleteCount.toLocaleString()}</strong>
+              <small>messages</small>
+            </a>
+            <article className="space">
+              <span>Space recovered</span>
+              <strong>{formatBytes(detail.recoverableBytes)}</strong>
+              <small>estimated</small>
+            </article>
+            <article className="keep">
+              <span>Keeping</span>
+              <strong>{detail.keepCount.toLocaleString()}</strong>
+              <small>messages</small>
+            </article>
+            <a className="review" href={filterUrl('REVIEW')}>
+              <span>Needs review</span>
+              <strong>{detail.reviewCount.toLocaleString()}</strong>
+              <small>messages</small>
+            </a>
+          </div>
+        </section>
+      )}
       <section className="classification-list">
         {detail?.messages.map((message) => (
           <article key={message.id}>
             <div className="classification-heading">
               <div><strong>{message.subject || '(No subject)'}</strong><span>{formatDate(message.receivedAt)}</span></div>
-              <span className={`recommendation ${message.canDelete ? 'delete' : 'keep'}`}>
-                {message.canDelete ? 'Can delete' : 'Keep / review'}
+              <span className={`recommendation ${message.decision.toLowerCase()}`}>
+                {formatDecision(message.decision)}
               </span>
             </div>
             <dl>
               <div><dt>Category</dt><dd>{message.category || 'Uncategorized'}</dd></div>
               <div><dt>Matched rule</dt><dd>{message.matchedRule || 'No matching rule'}</dd></div>
+              <div><dt>Message size</dt><dd>{formatBytes(message.sizeEstimate ?? 0)}</dd></div>
             </dl>
             <p>{message.comment || 'No classification comment available.'}</p>
           </article>
         ))}
       </section>
+      {detail && detail.totalPages > 1 && (
+        <nav className="pagination detail-pagination" aria-label="Message pages">
+          <button className="button secondary" disabled={!detail.hasPrevious}
+            onClick={() => setMessagePage((page) => page - 1)}>Previous</button>
+          <span>Page {detail.page + 1} of {detail.totalPages}</span>
+          <button className="button secondary" disabled={!detail.hasNext}
+            onClick={() => setMessagePage((page) => page + 1)}>Next 20</button>
+        </nav>
+      )}
     </>
   )
 }
@@ -575,6 +730,19 @@ function formatDuration(seconds: number) {
 
 function formatDate(value: string | null) {
   return value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : 'Unknown date'
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+}
+
+function formatDecision(decision: Decision) {
+  return decision === 'KEEP_IT' ? 'Keep it'
+    : decision === 'SAFE_TO_DELETE' ? 'Safe to delete'
+      : 'Review'
 }
 
 export default App

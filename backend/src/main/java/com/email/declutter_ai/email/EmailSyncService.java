@@ -63,7 +63,7 @@ public class EmailSyncService {
 			message.applyClassification(
 					classification.category(),
 					classification.comment(),
-					classification.canDelete(),
+					classification.decision(),
 					classification.ruleName());
 			if (classification.canDelete()
 					&& appParameterService.autoDeleteRecommended(accountEmail)) {

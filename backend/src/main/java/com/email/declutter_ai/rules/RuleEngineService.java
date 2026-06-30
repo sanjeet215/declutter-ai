@@ -1,6 +1,7 @@
 package com.email.declutter_ai.rules;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -11,13 +12,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.email.declutter_ai.email.EmailMessage;
+import com.email.declutter_ai.email.EmailMessageRepository;
 
 @Service
 public class RuleEngineService implements ApplicationRunner {
 	private final EmailRuleRepository repository;
+	private final DismissedBaseRuleRepository dismissedBaseRules;
+	private final EmailMessageRepository emailMessageRepository;
 
-	public RuleEngineService(EmailRuleRepository repository) {
+	public RuleEngineService(EmailRuleRepository repository,
+			DismissedBaseRuleRepository dismissedBaseRules,
+			EmailMessageRepository emailMessageRepository) {
 		this.repository = repository;
+		this.dismissedBaseRules = dismissedBaseRules;
+		this.emailMessageRepository = emailMessageRepository;
 	}
 
 	@Override @Transactional
@@ -44,16 +52,31 @@ public class RuleEngineService implements ApplicationRunner {
 
 	@Transactional(readOnly = true)
 	public Classification classify(String accountEmail, EmailMessage message) {
+		return classify(message, activeRules(accountEmail));
+	}
+
+	private List<EmailRule> activeRules(String accountEmail) {
 		var rules = new ArrayList<EmailRule>();
 		rules.addAll(repository.findByAccountEmailOrderByPriorityDesc(accountEmail));
-		rules.addAll(repository.findByAccountEmailIsNullOrderByPriorityDesc());
+		var dismissedIds = dismissedBaseRules.findByAccountEmail(accountEmail).stream()
+				.map(DismissedBaseRule::getRuleId)
+				.collect(java.util.stream.Collectors.toSet());
+		repository.findByAccountEmailIsNullOrderByPriorityDesc().stream()
+				.filter(rule -> !dismissedIds.contains(rule.getId()))
+				.forEach(rules::add);
+		return rules;
+	}
+
+	private Classification classify(
+			EmailMessage message, List<EmailRule> rules) {
 		return rules.stream().filter(EmailRule::isEnabled)
 				.filter(rule -> matches(rule, message))
 				.findFirst()
 				.map(rule -> new Classification(rule.getCategory(), rule.getComment(),
-						rule.isCanDelete(), rule.getName()))
+						rule.getDecision(), rule.getName()))
 				.orElse(new Classification("Uncategorized",
-						"No rule matched this message.", false, null));
+						"No rule matched this message.",
+						EmailRule.Decision.REVIEW, null));
 	}
 
 	private boolean matches(EmailRule rule, EmailMessage message) {
@@ -86,6 +109,25 @@ public class RuleEngineService implements ApplicationRunner {
 		return value != null && value.toLowerCase(Locale.ROOT).contains(needle);
 	}
 
+	@Transactional
+	public int reclassifyStoredMessages(String accountEmail) {
+		var messages = emailMessageRepository
+				.findByAccountEmailOrderByReceivedAtDesc(accountEmail);
+		var rules = activeRules(accountEmail);
+		for (var message : messages) {
+			var classification = classify(message, rules);
+			message.applyClassification(
+					classification.category(), classification.comment(),
+					classification.decision(), classification.ruleName());
+		}
+		emailMessageRepository.saveAll(messages);
+		return messages.size();
+	}
+
 	public record Classification(String category, String comment,
-			boolean canDelete, String ruleName) {}
+			EmailRule.Decision decision, String ruleName) {
+		public boolean canDelete() {
+			return decision == EmailRule.Decision.SAFE_TO_DELETE;
+		}
+	}
 }

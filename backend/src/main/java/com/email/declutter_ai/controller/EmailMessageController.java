@@ -103,14 +103,41 @@ public class EmailMessageController {
 	SenderDetails senderDetails(
 			@AuthenticationPrincipal OidcUser user,
 			@RequestParam String sender,
+			@RequestParam(required = false)
+					com.email.declutter_ai.rules.EmailRule.Decision decision,
 			@RequestParam(defaultValue = "0") @Min(0) int page,
-			@RequestParam(defaultValue = "50") @Min(1) @Max(100) int size) {
-		var result = emailMessageRepository
-				.findByAccountEmailAndSenderOrderByReceivedAtDesc(
-						user.getEmail(), sender, PageRequest.of(page, size));
+			@RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+		var pageable = PageRequest.of(page, size);
+		var result = decision == null
+				? emailMessageRepository.findByAccountEmailAndSenderOrderByReceivedAtDesc(
+						user.getEmail(), sender, pageable)
+				: emailMessageRepository
+						.findByAccountEmailAndSenderAndRuleDecisionOrderByReceivedAtDesc(
+								user.getEmail(), sender, decision, pageable);
+		var allMessages = emailMessageRepository.findByAccountEmailAndSender(
+				user.getEmail(), sender);
+		long safeToDelete = allMessages.stream()
+				.filter(message -> message.getRuleDecision()
+						== com.email.declutter_ai.rules.EmailRule.Decision.SAFE_TO_DELETE)
+				.count();
+		long keepCount = allMessages.stream()
+				.filter(message -> message.getRuleDecision()
+						== com.email.declutter_ai.rules.EmailRule.Decision.KEEP_IT)
+				.count();
+		long reviewCount = allMessages.size() - safeToDelete - keepCount;
+		long recoverableBytes = allMessages.stream()
+				.filter(message -> message.getRuleDecision()
+						== com.email.declutter_ai.rules.EmailRule.Decision.SAFE_TO_DELETE)
+				.mapToLong(message -> message.getSizeEstimate() == null
+						? 0 : message.getSizeEstimate())
+				.sum();
 		return new SenderDetails(
 				sender,
 				result.getTotalElements(),
+				safeToDelete,
+				keepCount,
+				reviewCount,
+				recoverableBytes,
 				result.getContent().stream().map(SenderMessageDetail::from).toList(),
 				result.getNumber(),
 				result.getTotalPages(),
@@ -202,17 +229,22 @@ public class EmailMessageController {
 	}
 
 	record SenderDetails(String sender, long messageCount,
+			long safeToDeleteCount, long keepCount, long reviewCount,
+			long recoverableBytes,
 			List<SenderMessageDetail> messages, int page, int totalPages,
 			boolean hasNext, boolean hasPrevious) {
 	}
 
 	record SenderMessageDetail(Long id, String subject, Instant receivedAt,
-			String category, String comment, boolean canDelete, String matchedRule) {
+			Integer sizeEstimate, String category, String comment,
+			boolean canDelete, String decision, String matchedRule) {
 		static SenderMessageDetail from(EmailMessage message) {
 			return new SenderMessageDetail(
 					message.getId(), message.getSubject(), message.getReceivedAt(),
+					message.getSizeEstimate(),
 					message.getRuleCategory(), message.getRuleComment(),
-					message.isCanDelete(), message.getMatchedRule());
+					message.isCanDelete(), message.getRuleDecision().name(),
+					message.getMatchedRule());
 		}
 	}
 }

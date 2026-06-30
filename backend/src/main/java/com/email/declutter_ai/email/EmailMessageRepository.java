@@ -63,6 +63,11 @@ public interface EmailMessageRepository extends JpaRepository<EmailMessage, Long
 	Page<EmailMessage> findByAccountEmailAndSenderOrderByReceivedAtDesc(
 			String accountEmail, String sender, Pageable pageable);
 
+	Page<EmailMessage> findByAccountEmailAndSenderAndRuleDecisionOrderByReceivedAtDesc(
+			String accountEmail, String sender,
+			com.email.declutter_ai.rules.EmailRule.Decision ruleDecision,
+			Pageable pageable);
+
 	Optional<EmailMessage> findByIdAndAccountEmail(
 			Long id, String accountEmail);
 

@@ -21,6 +21,9 @@ public class EmailRule {
 	private String comment;
 	@Column(name = "can_delete", nullable = false)
 	private boolean canDelete;
+	@Enumerated(EnumType.STRING)
+	@Column(name = "decision", length = 30)
+	private Decision decision;
 	@Column(name = "subject_contains", length = 1000)
 	private String subjectContains;
 	@Column(name = "sender_contains", length = 1000)
@@ -38,13 +41,14 @@ public class EmailRule {
 			String matchValue, String category, String comment,
 			boolean canDelete, int priority) {
 		this(accountEmail, name, matchField, matchValue, category, comment,
-				canDelete, priority, null, null, null);
+				canDelete, priority, null, null, null,
+				canDelete ? Decision.SAFE_TO_DELETE : Decision.REVIEW);
 	}
 
 	public EmailRule(String accountEmail, String name, MatchField matchField,
 			String matchValue, String category, String comment,
 			boolean canDelete, int priority, String subjectContains,
-			String senderContains, Integer olderThanDays) {
+			String senderContains, Integer olderThanDays, Decision decision) {
 		this.accountEmail = accountEmail;
 		this.name = name;
 		this.matchField = matchField;
@@ -56,6 +60,7 @@ public class EmailRule {
 		this.subjectContains = subjectContains;
 		this.senderContains = senderContains;
 		this.olderThanDays = olderThanDays;
+		this.decision = decision;
 	}
 
 	public Long getId() { return id; }
@@ -71,6 +76,27 @@ public class EmailRule {
 	public String getSubjectContains() { return subjectContains; }
 	public String getSenderContains() { return senderContains; }
 	public Integer getOlderThanDays() { return olderThanDays; }
+	public Decision getDecision() {
+		return decision != null ? decision
+				: canDelete ? Decision.SAFE_TO_DELETE : Decision.REVIEW;
+	}
 
 	public enum MatchField { SENDER, DOMAIN, SUBJECT, LABEL }
+	public enum Decision { KEEP_IT, SAFE_TO_DELETE, REVIEW }
+
+	public void update(String name, MatchField matchField, String matchValue,
+			String category, String comment, Decision decision, int priority,
+			String subjectContains, String senderContains, Integer olderThanDays) {
+		this.name = name;
+		this.matchField = matchField;
+		this.matchValue = matchValue;
+		this.category = category;
+		this.comment = comment;
+		this.decision = decision;
+		this.canDelete = decision == Decision.SAFE_TO_DELETE;
+		this.priority = priority;
+		this.subjectContains = subjectContains;
+		this.senderContains = senderContains;
+		this.olderThanDays = olderThanDays;
+	}
 }

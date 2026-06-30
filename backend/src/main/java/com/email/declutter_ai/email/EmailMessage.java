@@ -5,11 +5,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.email.declutter_ai.gmail.GmailClient.EmailMetadata;
+import com.email.declutter_ai.rules.EmailRule.Decision;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -84,6 +86,9 @@ public class EmailMessage {
 
 	@Column(name = "matched_rule", length = 120)
 	private String matchedRule;
+	@Enumerated(jakarta.persistence.EnumType.STRING)
+	@Column(name = "rule_decision", length = 30)
+	private Decision ruleDecision;
 
 	protected EmailMessage() {
 	}
@@ -119,10 +124,11 @@ public class EmailMessage {
 	}
 
 	public void applyClassification(String category, String comment,
-			boolean canDelete, String ruleName) {
+			Decision decision, String ruleName) {
 		this.ruleCategory = truncate(category, 100);
 		this.ruleComment = truncate(comment, 1000);
-		this.canDelete = canDelete;
+		this.ruleDecision = decision;
+		this.canDelete = decision == Decision.SAFE_TO_DELETE;
 		this.matchedRule = truncate(ruleName, 120);
 	}
 
@@ -189,5 +195,9 @@ public class EmailMessage {
 	public String getRuleCategory() { return ruleCategory; }
 	public String getRuleComment() { return ruleComment; }
 	public boolean isCanDelete() { return Boolean.TRUE.equals(canDelete); }
+	public Decision getRuleDecision() {
+		if (ruleDecision != null) return ruleDecision;
+		return isCanDelete() ? Decision.SAFE_TO_DELETE : Decision.REVIEW;
+	}
 	public String getMatchedRule() { return matchedRule; }
 }
