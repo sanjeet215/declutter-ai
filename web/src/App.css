@@ -47,9 +47,9 @@ h1 {
   max-width: 700px;
   margin: 0;
   color: #15231b;
-  font-size: clamp(48px, 7vw, 82px);
-  line-height: 0.98;
-  letter-spacing: -0.065em;
+  font-size: clamp(28px, 3.4vw, 38px);
+  line-height: 1.05;
+  letter-spacing: -0.045em;
 }
 
 .lede {
@@ -503,6 +503,39 @@ h1 {
 .drive-row strong { overflow: hidden; color: #20372a; text-overflow: ellipsis; white-space: nowrap; }
 .drive-head { color: #879289; background: #f7fbf8; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 
+.expense-hero { max-width: 880px; padding-bottom: 46px; }
+.expense-hero .lede { max-width: 720px; font-size: 17px; line-height: 1.6; }
+.expense-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 26px; }
+.expense-summary article { display: flex; min-height: 118px; padding: 22px; border: 1px solid #dce3df; border-radius: 18px; flex-direction: column; justify-content: center; background: rgba(255, 255, 255, .9); box-shadow: 0 14px 38px rgba(36, 70, 48, .055); }
+.expense-summary span { color: #68766d; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.expense-summary strong { margin-top: 7px; color: #183923; font-size: 30px; letter-spacing: -.04em; }
+.expense-summary strong.is-over { color: #a23b3b; }
+.expense-summary small { overflow: hidden; margin-top: 4px; color: #78847c; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.expense-email-card { margin-bottom: 26px; padding: 22px; border: 1px solid #dde5df; border-radius: 18px; background: rgba(255, 255, 255, .92); box-shadow: 0 12px 34px rgba(36, 70, 48, .045); }
+.expense-email-form { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 12px; margin-bottom: 16px; }
+.expense-email-form input { min-height: 44px; width: 100%; padding: 0 12px; border: 1px solid #d8e0da; border-radius: 10px; color: #20372a; background: white; font: inherit; }
+.expense-email-table { overflow: hidden; border: 1px solid #dde5df; border-radius: 18px; background: white; }
+.expense-email-row { display: grid; grid-template-columns: minmax(220px, 1fr) 160px auto; gap: 16px; align-items: center; padding: 16px 18px; color: #68766d; font-size: 13px; }
+.expense-email-row + .expense-email-row { border-top: 1px solid #edf1ee; }
+.expense-email-row strong { overflow: hidden; color: #20372a; text-overflow: ellipsis; white-space: nowrap; }
+.expense-workspace { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 18px; align-items: start; }
+.expense-form, .expense-table-card { padding: 22px; border: 1px solid #dde5df; border-radius: 18px; background: rgba(255, 255, 255, .92); box-shadow: 0 12px 34px rgba(36, 70, 48, .045); }
+.expense-form { display: grid; gap: 13px; }
+.expense-form .section-heading { margin-bottom: 0; }
+.expense-form label { display: grid; gap: 6px; color: #20372a; font-size: 13px; font-weight: 800; }
+.expense-form input, .expense-form select, .expense-filter { min-height: 42px; width: 100%; padding: 0 12px; border: 1px solid #d8e0da; border-radius: 10px; color: #20372a; background: white; font: inherit; }
+.expense-submit { width: 100%; margin-top: 4px; }
+.expense-table-card .section-heading { gap: 16px; }
+.expense-ledger-actions { display: flex; gap: 10px; align-items: center; }
+.expense-filter { max-width: 180px; }
+.expense-table { overflow: hidden; border: 1px solid #dde5df; border-radius: 18px; background: white; }
+.expense-row { display: grid; grid-template-columns: minmax(190px, 1fr) 130px 130px 110px 76px; gap: 16px; align-items: center; padding: 16px 18px; color: #68766d; font-size: 13px; }
+.expense-row + .expense-row { border-top: 1px solid #edf1ee; }
+.expense-row strong { overflow: hidden; color: #20372a; text-overflow: ellipsis; white-space: nowrap; }
+.expense-row span:nth-child(4) { color: #183923; font-weight: 800; text-align: right; }
+.expense-head { color: #879289; background: #f7fbf8; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.expense-head span:nth-child(4) { color: #879289; }
+
 .sender-actions {
   display: flex;
   align-items: center;
@@ -697,6 +730,17 @@ h1 {
   .photos-row { grid-template-columns: 1fr; gap: 6px; }
   .photos-head { display: none; }
   .drive-permission-card { align-items: stretch; flex-direction: column; }
+  .expense-summary { grid-template-columns: 1fr; }
+  .expense-email-form { grid-template-columns: 1fr; }
+  .expense-email-row { grid-template-columns: 1fr; gap: 8px; }
+  .expense-email-row .delete-button { width: fit-content; }
+  .expense-workspace { grid-template-columns: 1fr; }
+  .expense-table-card .section-heading { align-items: stretch; flex-direction: column; }
+  .expense-ledger-actions { align-items: stretch; flex-direction: column; }
+  .expense-filter { max-width: none; }
+  .expense-row { grid-template-columns: 1fr; gap: 6px; }
+  .expense-row span:nth-child(4) { text-align: left; }
+  .expense-head { display: none; }
 
   .summary {
     grid-template-columns: 1fr;

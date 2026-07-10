@@ -112,6 +112,40 @@ type SyncStatus = {
   error: string | null
 }
 
+type ExpenseCategory = 'Food' | 'Transport' | 'Bills' | 'Shopping' | 'Health' | 'Entertainment' | 'Other'
+type Expense = {
+  id: number
+  description: string
+  category: ExpenseCategory
+  amount: number
+  date: string
+}
+type ExpenseEmailSender = {
+  id: number
+  fromEmail: string
+  createdAt: string
+}
+type LedgerRefreshResult = {
+  processedMessages: number
+  message: string
+}
+
+const EXPENSE_CATEGORIES: ExpenseCategory[] = [
+  'Food',
+  'Transport',
+  'Bills',
+  'Shopping',
+  'Health',
+  'Entertainment',
+  'Other',
+]
+
+const DEFAULT_EXPENSES: Expense[] = [
+  { id: 1, description: 'Coffee and breakfast', category: 'Food', amount: 12.5, date: '2026-07-08' },
+  { id: 2, description: 'Metro card recharge', category: 'Transport', amount: 35, date: '2026-07-07' },
+  { id: 3, description: 'Cloud storage subscription', category: 'Bills', amount: 9.99, date: '2026-07-05' },
+]
+
 let csrf: CsrfResponse | null = null
 
 const mutation = async (url: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown) => {
@@ -155,6 +189,7 @@ function App() {
   const driveUntitledPage = window.location.pathname === '/drive/untitled'
   const driveFilesPage = window.location.pathname === '/drive/files'
   const photosPage = window.location.pathname === '/photos'
+  const expensesPage = window.location.pathname === '/expenses'
   const [senders, setSenders] = useState<SenderMessageCount[]>([])
   const [senderPage, setSenderPage] = useState(0)
   const [senderPageInfo, setSenderPageInfo] = useState<SenderPage | null>(null)
@@ -347,8 +382,8 @@ function App() {
 
   useEffect(() => {
     if (classificationPage) void loadRules()
-    else if (!senderDetailPage && !drivePage && !driveUntitledPage && !driveFilesPage && !photosPage) void loadSenders(senderPage)
-  }, [senderPage, classificationPage, senderDetailPage, drivePage, driveUntitledPage, driveFilesPage, photosPage])
+    else if (!senderDetailPage && !drivePage && !driveUntitledPage && !driveFilesPage && !photosPage && !expensesPage) void loadSenders(senderPage)
+  }, [senderPage, classificationPage, senderDetailPage, drivePage, driveUntitledPage, driveFilesPage, photosPage, expensesPage])
 
   useEffect(() => {
     if (!syncing) return
@@ -394,6 +429,10 @@ function App() {
 
   if (photosPage) {
     return <main><Topbar active="photos" /><PhotosPage /></main>
+  }
+
+  if (expensesPage) {
+    return <main><Topbar active="expenses" /><ExpenseTrackerPage /></main>
   }
 
   return (
@@ -536,7 +575,7 @@ function App() {
   )
 }
 
-function Topbar({ active }: { active: 'mailbox' | 'classification' | 'drive' | 'photos' }) {
+function Topbar({ active }: { active: 'mailbox' | 'classification' | 'drive' | 'photos' | 'expenses' }) {
   return (
     <header className="topbar">
       <a className="brand" href="/">Declutter<span>AI</span></a>
@@ -545,9 +584,288 @@ function Topbar({ active }: { active: 'mailbox' | 'classification' | 'drive' | '
         <a className={active === 'classification' ? 'active' : ''} href="/classification">Classification</a>
         <a className={active === 'drive' ? 'active' : ''} href="/drive">Drive</a>
         <a className={active === 'photos' ? 'active' : ''} href="/photos">Photos</a>
+        <a className={active === 'expenses' ? 'active' : ''} href="/expenses">Expenses</a>
         <a className="button secondary" href="/oauth2/authorization/google">Connect Google</a>
       </nav>
     </header>
+  )
+}
+
+function ExpenseTrackerPage() {
+  const [expenses, setExpenses] = useState<Expense[]>(DEFAULT_EXPENSES)
+  const [categoryFilter, setCategoryFilter] = useState<'All' | ExpenseCategory>('All')
+  const [budget, setBudget] = useState(750)
+  const [emailSenders, setEmailSenders] = useState<ExpenseEmailSender[]>([])
+  const [loadingEmailSenders, setLoadingEmailSenders] = useState(true)
+  const [emailSenderError, setEmailSenderError] = useState<string | null>(null)
+  const [emailSenderMessage, setEmailSenderMessage] = useState<string | null>(null)
+  const [refreshingLedger, setRefreshingLedger] = useState(false)
+  const [ledgerMessage, setLedgerMessage] = useState<string | null>(null)
+  const [ledgerError, setLedgerError] = useState<string | null>(null)
+
+  const filteredExpenses = categoryFilter === 'All'
+    ? expenses
+    : expenses.filter((expense) => expense.category === categoryFilter)
+  const totalSpent = expenses.reduce((total, expense) => total + expense.amount, 0)
+  const filteredTotal = filteredExpenses.reduce((total, expense) => total + expense.amount, 0)
+  const largestExpense = expenses.reduce<Expense | null>(
+    (largest, expense) => !largest || expense.amount > largest.amount ? expense : largest,
+    null,
+  )
+  const remainingBudget = budget - totalSpent
+
+  const loadExpenseEmailSenders = async () => {
+    setLoadingEmailSenders(true)
+    setEmailSenderError(null)
+    try {
+      const response = await fetch('/api/expenses/email-senders', {
+        headers: { Accept: 'application/json' },
+      })
+      if (!response.ok) {
+        setEmailSenderError(await apiError(response, 'Unable to load expense email senders.'))
+        return
+      }
+      setEmailSenders(await response.json())
+    } catch (caught) {
+      setEmailSenderError(caught instanceof Error
+        ? caught.message
+        : 'Unable to load expense email senders.')
+    } finally {
+      setLoadingEmailSenders(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadExpenseEmailSenders()
+  }, [])
+
+  const addExpense = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    const amount = Number(form.get('amount'))
+    const description = form.get('description')?.toString().trim()
+    const category = form.get('category') as ExpenseCategory | null
+    const date = form.get('date')?.toString()
+    if (!description || !category || !date || !Number.isFinite(amount) || amount <= 0) return
+
+    setExpenses((current) => [{
+      id: Date.now(),
+      description,
+      category,
+      amount,
+      date,
+    }, ...current])
+    formElement.reset()
+  }
+
+  const deleteExpense = (id: number) => {
+    setExpenses((current) => current.filter((expense) => expense.id !== id))
+  }
+
+  const addExpenseEmailSender = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    const fromEmail = form.get('fromEmail')?.toString().trim()
+    if (!fromEmail) return
+    setEmailSenderError(null)
+    setEmailSenderMessage(null)
+    try {
+      const response = await mutation('/api/expenses/email-senders', 'POST', { fromEmail })
+      if (!response.ok) {
+        setEmailSenderError(await apiError(response, 'Unable to add expense email sender.'))
+        return
+      }
+      const saved: ExpenseEmailSender = await response.json()
+      setEmailSenders((current) => [...current, saved]
+        .sort((first, second) => first.fromEmail.localeCompare(second.fromEmail)))
+      formElement.reset()
+      setEmailSenderMessage('Email sender added.')
+    } catch (caught) {
+      setEmailSenderError(caught instanceof Error
+        ? caught.message
+        : 'Unable to add expense email sender.')
+    }
+  }
+
+  const deleteExpenseEmailSender = async (sender: ExpenseEmailSender) => {
+    setEmailSenderError(null)
+    setEmailSenderMessage(null)
+    try {
+      const response = await mutation(`/api/expenses/email-senders/${sender.id}`, 'DELETE')
+      if (!response.ok) {
+        setEmailSenderError(await apiError(response, 'Unable to delete expense email sender.'))
+        return
+      }
+      setEmailSenders((current) => current.filter((item) => item.id !== sender.id))
+      setEmailSenderMessage('Email sender deleted.')
+    } catch (caught) {
+      setEmailSenderError(caught instanceof Error
+        ? caught.message
+        : 'Unable to delete expense email sender.')
+    }
+  }
+
+  const refreshLedger = async () => {
+    setRefreshingLedger(true)
+    setLedgerMessage(null)
+    setLedgerError(null)
+    try {
+      const response = await mutation('/api/expenses/ledger/refresh', 'POST')
+      if (!response.ok) {
+        setLedgerError(await apiError(response, 'Unable to refresh ledger.'))
+        return
+      }
+      const result: LedgerRefreshResult = await response.json()
+      setLedgerMessage(`${result.message} Processed ${result.processedMessages.toLocaleString()} messages.`)
+    } catch (caught) {
+      setLedgerError(caught instanceof Error ? caught.message : 'Unable to refresh ledger.')
+    } finally {
+      setRefreshingLedger(false)
+    }
+  }
+
+  return (
+    <>
+      <section className="hero expense-hero">
+        <p className="eyebrow">Expense tracker</p>
+        <h1>Track spending without the spreadsheet fog.</h1>
+        <p className="lede">
+          Add day-to-day expenses, watch your budget, and filter the table by category.
+          This page keeps entries in the browser while you are using it.
+        </p>
+      </section>
+
+      <section className="expense-summary" aria-label="Expense summary">
+        <article>
+          <span>Total spent</span>
+          <strong>{formatCurrency(totalSpent)}</strong>
+          <small>{expenses.length.toLocaleString()} entries</small>
+        </article>
+        <article>
+          <span>Budget left</span>
+          <strong className={remainingBudget < 0 ? 'is-over' : ''}>{formatCurrency(remainingBudget)}</strong>
+          <small>Monthly budget {formatCurrency(budget)}</small>
+        </article>
+        <article>
+          <span>Largest expense</span>
+          <strong>{largestExpense ? formatCurrency(largestExpense.amount) : formatCurrency(0)}</strong>
+          <small>{largestExpense?.description ?? 'No expenses yet'}</small>
+        </article>
+      </section>
+
+      <section className="expense-email-card">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Expense email sources</p>
+            <h2>From email IDs</h2>
+          </div>
+        </div>
+        <form className="expense-email-form" onSubmit={(event) => void addExpenseEmailSender(event)}>
+          <input name="fromEmail" type="email" placeholder="alerts@bank.com" required />
+          <button className="button primary" type="submit">Add email ID</button>
+        </form>
+        {emailSenderMessage && <p className="inline-success" role="status">{emailSenderMessage}</p>}
+        {emailSenderError && <p className="inline-error" role="alert">{emailSenderError}</p>}
+        {loadingEmailSenders && <div className="state">Loading email IDs…</div>}
+        {!loadingEmailSenders && !emailSenderError && emailSenders.length === 0 && (
+          <div className="state">No email IDs added yet.</div>
+        )}
+        {!loadingEmailSenders && emailSenders.length > 0 && (
+          <div className="expense-email-table">
+            {emailSenders.map((sender) => (
+              <article className="expense-email-row" key={sender.id}>
+                <strong>{sender.fromEmail}</strong>
+                <span>Added {formatDate(sender.createdAt)}</span>
+                <button className="delete-button" type="button"
+                  onClick={() => void deleteExpenseEmailSender(sender)}>Delete</button>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="expense-workspace">
+        <form className="expense-form" onSubmit={addExpense}>
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">New entry</p>
+              <h2>Add expense</h2>
+            </div>
+          </div>
+          <label>
+            Description
+            <input name="description" placeholder="Lunch, rent, subscription..." required />
+          </label>
+          <label>
+            Amount
+            <input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" required />
+          </label>
+          <label>
+            Category
+            <select name="category" defaultValue="Food" required>
+              {EXPENSE_CATEGORIES.map((category) => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Date
+            <input name="date" type="date" defaultValue={todayInputValue()} required />
+          </label>
+          <label>
+            Monthly budget
+            <input type="number" min="0" step="1" value={budget}
+              onChange={(event) => setBudget(Number(event.target.value) || 0)} />
+          </label>
+          <button className="button primary expense-submit" type="submit">Add expense</button>
+        </form>
+
+        <section className="expense-table-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Ledger</p>
+              <h2>{formatCurrency(filteredTotal)} shown</h2>
+            </div>
+            <div className="expense-ledger-actions">
+              <button className="button secondary" type="button" disabled={refreshingLedger}
+                onClick={() => void refreshLedger()}>
+                {refreshingLedger ? 'Refreshing…' : 'Refresh'}
+              </button>
+              <select className="expense-filter" value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value as 'All' | ExpenseCategory)}>
+                <option value="All">All categories</option>
+                {EXPENSE_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {ledgerMessage && <p className="inline-success" role="status">{ledgerMessage}</p>}
+          {ledgerError && <p className="inline-error" role="alert">{ledgerError}</p>}
+          {filteredExpenses.length === 0 ? (
+            <div className="state">No expenses match this category.</div>
+          ) : (
+            <div className="expense-table">
+              <div className="expense-row expense-head">
+                <span>Description</span><span>Category</span><span>Date</span><span>Amount</span><span></span>
+              </div>
+              {filteredExpenses.map((expense) => (
+                <article className="expense-row" key={expense.id}>
+                  <strong>{expense.description}</strong>
+                  <span>{expense.category}</span>
+                  <span>{formatDate(expense.date)}</span>
+                  <span>{formatCurrency(expense.amount)}</span>
+                  <button className="message-delete-button" type="button"
+                    onClick={() => deleteExpense(expense.id)}>Delete</button>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </section>
+    </>
   )
 }
 
@@ -1221,6 +1539,18 @@ function formatBytes(bytes: number) {
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+}
+
+function formatCurrency(amount: number) {
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(amount)
+}
+
+function todayInputValue() {
+  return new Date().toISOString().slice(0, 10)
 }
 
 function formatDecision(decision: Decision) {

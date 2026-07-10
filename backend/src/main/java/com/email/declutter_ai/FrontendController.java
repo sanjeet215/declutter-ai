@@ -65,4 +65,11 @@ public class FrontendController {
 				.location(frontendUri.resolve("/photos"))
 				.build();
 	}
+
+	@GetMapping("/expenses")
+	ResponseEntity<Void> expenses() {
+		return ResponseEntity.status(HttpStatus.FOUND)
+				.location(frontendUri.resolve("/expenses"))
+				.build();
+	}
 }
