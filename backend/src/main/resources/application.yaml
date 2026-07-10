@@ -21,7 +21,8 @@ spring:
               - profile
               - email
               - https://www.googleapis.com/auth/gmail.modify
-              - https://www.googleapis.com/auth/drive.metadata.readonly
+              - https://www.googleapis.com/auth/drive.readonly
+              - https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata
 
 gmail:
   api-base-url: https://gmail.googleapis.com

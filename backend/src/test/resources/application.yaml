@@ -18,6 +18,8 @@ spring:
               - openid
               - profile
               - email
+              - https://www.googleapis.com/auth/drive.readonly
+              - https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata
 
 gmail:
   api-base-url: https://gmail.googleapis.com

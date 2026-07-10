@@ -56,6 +56,53 @@ type SenderDetail = {
   messages: Array<{ id: number; subject: string | null; receivedAt: string | null; sizeEstimate: number | null; category: string | null; comment: string | null; canDelete: boolean; decision: Decision; matchedRule: string | null }>
 }
 
+type DriveFile = {
+  id: string
+  name: string
+  mimeType: string
+  size: string | null
+  quotaBytesUsed: string | null
+  modifiedTime: string | null
+  webViewLink: string | null
+}
+
+type UntitledFilesReport = {
+  files: DriveFile[]
+  fileCount: number
+  recoverableBytes: number
+}
+
+type DriveFileListPage = UntitledFilesReport & {
+  nextPageToken: string | null
+  hasPrevious: boolean
+}
+
+type DriveAccessStatus = {
+  hasDriveAccess: boolean
+  hasDriveReadonly: boolean
+  hasDriveMetadataReadonly: boolean
+}
+
+type PhotosAccessStatus = {
+  hasPhotosAccess: boolean
+}
+
+type PhotosMediaItem = {
+  id: string
+  productUrl: string | null
+  baseUrl: string | null
+  mimeType: string
+  filename: string | null
+  mediaMetadata: { creationTime: string | null; width: string | null; height: string | null } | null
+}
+
+type PhotosMediaPage = {
+  mediaItems: PhotosMediaItem[]
+  itemCount: number
+  nextPageToken: string | null
+  hasPrevious: boolean
+}
+
 type SyncStatus = {
   state: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED'
   processed: number
@@ -104,6 +151,10 @@ const apiError = async (response: Response, fallback: string) => {
 function App() {
   const classificationPage = window.location.pathname === '/classification'
   const senderDetailPage = window.location.pathname === '/sender'
+  const drivePage = window.location.pathname === '/drive'
+  const driveUntitledPage = window.location.pathname === '/drive/untitled'
+  const driveFilesPage = window.location.pathname === '/drive/files'
+  const photosPage = window.location.pathname === '/photos'
   const [senders, setSenders] = useState<SenderMessageCount[]>([])
   const [senderPage, setSenderPage] = useState(0)
   const [senderPageInfo, setSenderPageInfo] = useState<SenderPage | null>(null)
@@ -296,8 +347,8 @@ function App() {
 
   useEffect(() => {
     if (classificationPage) void loadRules()
-    else if (!senderDetailPage) void loadSenders(senderPage)
-  }, [senderPage, classificationPage, senderDetailPage])
+    else if (!senderDetailPage && !drivePage && !driveUntitledPage && !driveFilesPage && !photosPage) void loadSenders(senderPage)
+  }, [senderPage, classificationPage, senderDetailPage, drivePage, driveUntitledPage, driveFilesPage, photosPage])
 
   useEffect(() => {
     if (!syncing) return
@@ -327,6 +378,22 @@ function App() {
 
   if (senderDetailPage) {
     return <main><Topbar active="mailbox" /><SenderDetailPage /></main>
+  }
+
+  if (drivePage) {
+    return <main><Topbar active="drive" /><DrivePage /></main>
+  }
+
+  if (driveUntitledPage) {
+    return <main><Topbar active="drive" /><DriveUntitledPage /></main>
+  }
+
+  if (driveFilesPage) {
+    return <main><Topbar active="drive" /><DriveFilesPage /></main>
+  }
+
+  if (photosPage) {
+    return <main><Topbar active="photos" /><PhotosPage /></main>
   }
 
   return (
@@ -469,16 +536,433 @@ function App() {
   )
 }
 
-function Topbar({ active }: { active: 'mailbox' | 'classification' }) {
+function Topbar({ active }: { active: 'mailbox' | 'classification' | 'drive' | 'photos' }) {
   return (
     <header className="topbar">
       <a className="brand" href="/">Declutter<span>AI</span></a>
       <nav className="topnav">
         <a className={active === 'mailbox' ? 'active' : ''} href="/">Mailbox</a>
         <a className={active === 'classification' ? 'active' : ''} href="/classification">Classification</a>
-        <a className="button secondary" href="/oauth2/authorization/google">Connect Gmail</a>
+        <a className={active === 'drive' ? 'active' : ''} href="/drive">Drive</a>
+        <a className={active === 'photos' ? 'active' : ''} href="/photos">Photos</a>
+        <a className="button secondary" href="/oauth2/authorization/google">Connect Google</a>
       </nav>
     </header>
+  )
+}
+
+function PhotosPage() {
+  const [page, setPage] = useState<PhotosMediaPage | null>(null)
+  const [pageTokens, setPageTokens] = useState<(string | null)[]>([null])
+  const [pageIndex, setPageIndex] = useState(0)
+  const [photosError, setPhotosError] = useState<string | null>(null)
+  const [loadingPhotos, setLoadingPhotos] = useState(false)
+  const [shouldLoadPhotos, setShouldLoadPhotos] = useState(false)
+
+  useEffect(() => {
+    if (!shouldLoadPhotos) return
+    const load = async () => {
+      setPhotosError(null)
+      setLoadingPhotos(true)
+      const statusController = new AbortController()
+      const statusTimeout = window.setTimeout(() => statusController.abort(), 8000)
+      try {
+        const statusResponse = await fetch('/api/photos/status', {
+          headers: { Accept: 'application/json' },
+          signal: statusController.signal,
+        })
+        if (statusResponse.ok) {
+          const status: PhotosAccessStatus = await statusResponse.json()
+          if (!status.hasPhotosAccess) {
+            setPhotosError('The current Google session does not include Photos access. Click Upgrade Photos access and approve Google Photos permission.')
+            return
+          }
+        }
+        window.clearTimeout(statusTimeout)
+
+        const token = pageTokens[pageIndex]
+        const query = new URLSearchParams({ pageSize: '20' })
+        if (token) query.set('pageToken', token)
+        const controller = new AbortController()
+        const timeout = window.setTimeout(() => controller.abort(), 12000)
+        const response = await fetch(`/api/photos/media/page?${query}`, {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        })
+        window.clearTimeout(timeout)
+        if (!response.ok) {
+          setPhotosError(await apiError(response, 'Unable to load Google Photos media.'))
+          return
+        }
+        const result: PhotosMediaPage = await response.json()
+        setPage(result)
+        if (result.nextPageToken) {
+          setPageTokens((tokens) => tokens[pageIndex + 1]
+            ? tokens
+            : [...tokens, result.nextPageToken])
+        }
+      } catch (caught) {
+        setPhotosError(caught instanceof DOMException && caught.name === 'AbortError'
+          ? 'Google Photos is taking too long to respond. Try again in a moment, or use Drive metadata for file sizes.'
+          : caught instanceof Error ? caught.message : 'Unable to load Google Photos media.')
+      } finally {
+        window.clearTimeout(statusTimeout)
+        setLoadingPhotos(false)
+      }
+    }
+    void load()
+  }, [shouldLoadPhotos, pageIndex, pageTokens])
+
+  return (
+    <>
+      <section className="hero drive-hero">
+        <p className="eyebrow">Google Photos cleanup</p>
+        <h1>Photos, carefully.</h1>
+        <p className="lede">
+          Google Photos API access is limited. This page lists available media metadata only: file names, type, date, and dimensions.
+        </p>
+      </section>
+      <section className="photos-limitation-card">
+        <p className="eyebrow">API limitation</p>
+        <h2>Google Photos only exposes app-created library data to this API.</h2>
+        <p>
+          We can build cleanup workflows here, but unlike Drive, Google does not currently expose your whole Photos library for broad third-party cleanup.
+        </p>
+      </section>
+      {photosError && <PhotosPermissionNotice message={photosError} />}
+      {!shouldLoadPhotos && (
+        <section className="drive-table-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Metadata</p>
+              <h2>Load Google Photos metadata</h2>
+            </div>
+            <button className="button primary" onClick={() => setShouldLoadPhotos(true)}>
+              Load first 20
+            </button>
+          </div>
+          <p className="drive-note">
+            This is manual so the page never hangs on open. Google Photos does not provide byte size through this API.
+          </p>
+        </section>
+      )}
+      {loadingPhotos && !photosError && <div className="state">Loading 20 Photos media items…</div>}
+      {page && !photosError && (
+        <section className="drive-table-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Media</p>
+              <h2>{page.itemCount.toLocaleString()} shown on this page</h2>
+            </div>
+          </div>
+          {page.mediaItems.length === 0 ? (
+            <div className="state">No accessible Google Photos media found for this app.</div>
+          ) : (
+            <div className="drive-table">
+              <div className="photos-row photos-head">
+                <span>File name</span><span>Type</span><span>Created</span><span>Dimensions</span>
+              </div>
+              {page.mediaItems.map((item) => (
+                <a key={item.id} className="photos-row"
+                  href={item.productUrl ?? '#'} target="_blank" rel="noreferrer">
+                  <strong>{item.filename ?? '(No filename)'}</strong>
+                  <span>{photosMediaType(item.mimeType)}</span>
+                  <span>{formatDate(item.mediaMetadata?.creationTime ?? null)}</span>
+                  <span>{photosDimensions(item)}</span>
+                </a>
+              ))}
+            </div>
+          )}
+          <nav className="pagination detail-pagination" aria-label="Google Photos media pages">
+            <button className="button secondary" disabled={pageIndex === 0}
+              onClick={() => setPageIndex((current) => current - 1)}>Previous</button>
+            <span>Page {pageIndex + 1}</span>
+            <button className="button secondary" disabled={!page.nextPageToken}
+              onClick={() => setPageIndex((current) => current + 1)}>Next 20</button>
+          </nav>
+        </section>
+      )}
+    </>
+  )
+}
+
+function PhotosPermissionNotice({ message }: { message: string }) {
+  const currentPath = `${window.location.pathname}${window.location.search}`
+  return (
+    <section className="drive-permission-card" role="alert">
+      <div>
+        <p className="eyebrow">Photos permission needed</p>
+        <h2>Reconnect Google Photos access</h2>
+        <p>{message}</p>
+        <p className="permission-help">
+          You may also need to enable the Google Photos Library API in the same Google Cloud project.
+        </p>
+      </div>
+      <a className="button primary" href={`/oauth2/authorization/google?${new URLSearchParams({
+        force_consent: 'true',
+        return_to: currentPath,
+      })}`}>
+        Upgrade Photos access
+      </a>
+    </section>
+  )
+}
+
+function DrivePage() {
+  const [preview, setPreview] = useState<DriveFileListPage | null>(null)
+  const [driveError, setDriveError] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(true)
+
+  useEffect(() => {
+    const load = async () => {
+      setDriveError(null)
+      setPreviewLoading(true)
+      const statusResponse = await fetch('/api/drive/status', {
+        headers: { Accept: 'application/json' },
+      })
+      if (statusResponse.ok) {
+        const status: DriveAccessStatus = await statusResponse.json()
+        if (!status.hasDriveAccess) {
+          setDriveError('The current Google session does not include Drive access. Click Upgrade Drive access and approve Google Drive permission.')
+          setPreviewLoading(false)
+          return
+        }
+      }
+      const controller = new AbortController()
+      const timeout = window.setTimeout(() => controller.abort(), 10000)
+      try {
+        const response = await fetch('/api/drive/untitled/page?pageSize=20', {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        })
+        if (!response.ok) {
+          setDriveError(await apiError(response, 'Unable to load Google Drive files.'))
+          return
+        }
+        setPreview(await response.json())
+      } catch (caught) {
+        setDriveError(caught instanceof DOMException && caught.name === 'AbortError'
+          ? 'Drive preview is taking too long. Open the category to load files page by page.'
+          : caught instanceof Error ? caught.message : 'Unable to load Google Drive files.')
+      } finally {
+        window.clearTimeout(timeout)
+        setPreviewLoading(false)
+      }
+    }
+    void load()
+  }, [])
+
+  return (
+    <>
+      <section className="hero drive-hero">
+        <p className="eyebrow">Google Drive cleanup</p>
+        <h1>Untitled files first.</h1>
+        <p className="lede">Find forgotten Untitled Drive files and estimate how much storage you could recover if they were removed.</p>
+      </section>
+      {driveError && <DrivePermissionNotice message={driveError} />}
+      <section className="drive-table-card">
+        <div className="section-heading">
+          <div><p className="eyebrow">Cleanup categories</p><h2>Drive checks</h2></div>
+        </div>
+        <div className="drive-category-table">
+          <a className="drive-category-row" href="/drive/untitled">
+            <strong>Untitled documents</strong>
+            <span>{preview ? `${preview.fileCount.toLocaleString()}${preview.nextPageToken ? '+' : ''}` : previewLoading ? 'Checking…' : 'Open'}</span>
+            <span>{preview ? formatBytes(preview.recoverableBytes) : '—'}</span>
+            <small>Open list →</small>
+          </a>
+          <a className="drive-category-row" href="/drive/files">
+            <strong>All Drive files</strong>
+            <span>Metadata</span>
+            <span>Name + size</span>
+            <small>Open list →</small>
+          </a>
+          <div className="drive-category-row is-disabled">
+            <strong>Duplicate files</strong>
+            <span>Coming next</span>
+            <span>—</span>
+            <small>Not scanned yet</small>
+          </div>
+        </div>
+      </section>
+      <p className="drive-note">
+        The landing page only checks the first 20 files so it stays fast. A plus sign means more files are available on the detail page.
+      </p>
+    </>
+  )
+}
+
+function DriveUntitledPage() {
+  return (
+    <DriveFileListPageView
+      title="Untitled documents."
+      description="Review untitled Drive files 20 at a time, with estimated recoverable space for this page."
+      endpoint="/api/drive/untitled/page"
+      backHref="/drive"
+      backLabel="Back to Drive checks"
+      eyebrow="Untitled files"
+      emptyMessage="No untitled Drive files found."
+    />
+  )
+}
+
+function DriveFilesPage() {
+  return (
+    <DriveFileListPageView
+      title="All Drive files."
+      description="List Drive file metadata 20 at a time: name, type, modified date, and storage used."
+      endpoint="/api/drive/files/page"
+      backHref="/drive"
+      backLabel="Back to Drive checks"
+      eyebrow="Drive files"
+      emptyMessage="No Drive files found."
+    />
+  )
+}
+
+function DriveFileListPageView({
+  title,
+  description,
+  endpoint,
+  backHref,
+  backLabel,
+  eyebrow,
+  emptyMessage,
+}: {
+  title: string
+  description: string
+  endpoint: string
+  backHref: string
+  backLabel: string
+  eyebrow: string
+  emptyMessage: string
+}) {
+  const [page, setPage] = useState<DriveFileListPage | null>(null)
+  const [pageTokens, setPageTokens] = useState<(string | null)[]>([null])
+  const [pageIndex, setPageIndex] = useState(0)
+  const [driveError, setDriveError] = useState<string | null>(null)
+  const [loadingPage, setLoadingPage] = useState(true)
+
+  useEffect(() => {
+    const load = async () => {
+      setDriveError(null)
+      setLoadingPage(true)
+      const statusResponse = await fetch('/api/drive/status', {
+        headers: { Accept: 'application/json' },
+      })
+      if (statusResponse.ok) {
+        const status: DriveAccessStatus = await statusResponse.json()
+        if (!status.hasDriveAccess) {
+          setDriveError('The current Google session does not include Drive access. Click Upgrade Drive access and approve Google Drive permission.')
+          setLoadingPage(false)
+          return
+        }
+      }
+      const token = pageTokens[pageIndex]
+      const query = new URLSearchParams({ pageSize: '20' })
+      if (token) query.set('pageToken', token)
+      const controller = new AbortController()
+      const timeout = window.setTimeout(() => controller.abort(), 20000)
+      try {
+      const response = await fetch(`${endpoint}?${query}`, {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        })
+        if (!response.ok) {
+          setDriveError(await apiError(response, 'Unable to load Drive files.'))
+          return
+        }
+        const result: DriveFileListPage = await response.json()
+        setPage(result)
+        if (result.nextPageToken) {
+          setPageTokens((tokens) => tokens[pageIndex + 1]
+            ? tokens
+            : [...tokens, result.nextPageToken])
+        }
+      } catch (caught) {
+        setDriveError(caught instanceof DOMException && caught.name === 'AbortError'
+          ? 'Google Drive is taking too long to respond. Try again in a moment.'
+          : caught instanceof Error ? caught.message : 'Unable to load Drive files.')
+      } finally {
+        window.clearTimeout(timeout)
+        setLoadingPage(false)
+      }
+    }
+    void load()
+  }, [pageIndex, pageTokens])
+
+  return (
+    <>
+      <section className="hero drive-hero">
+        <p className="eyebrow">Google Drive cleanup</p>
+        <h1>{title}</h1>
+        <p className="lede">{description}</p>
+        <a className="text-button back-link" href={backHref}>← {backLabel}</a>
+      </section>
+      {driveError && <DrivePermissionNotice message={driveError} />}
+      {loadingPage && !driveError && <div className="state">Loading 20 Drive files…</div>}
+      {page && (
+        <section className="drive-table-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">{eyebrow}</p>
+              <h2>{page.fileCount.toLocaleString()} shown on this page</h2>
+            </div>
+            <strong>{formatBytes(page.recoverableBytes)} recoverable on this page</strong>
+          </div>
+          {page.files.length === 0 ? (
+            <div className="state">{emptyMessage}</div>
+          ) : (
+            <DriveFileTable files={page.files} />
+          )}
+          <nav className="pagination detail-pagination" aria-label="Untitled Drive file pages">
+            <button className="button secondary" disabled={pageIndex === 0}
+              onClick={() => setPageIndex((current) => current - 1)}>Previous</button>
+            <span>Page {pageIndex + 1}</span>
+            <button className="button secondary" disabled={!page.nextPageToken}
+              onClick={() => setPageIndex((current) => current + 1)}>Next 20</button>
+          </nav>
+        </section>
+      )}
+    </>
+  )
+}
+
+function DrivePermissionNotice({ message }: { message: string }) {
+  const currentPath = `${window.location.pathname}${window.location.search}`
+  return (
+    <section className="drive-permission-card" role="alert">
+      <div>
+        <p className="eyebrow">Drive permission needed</p>
+        <h2>Reconnect Google Drive access</h2>
+        <p>{message}</p>
+        <p className="permission-help">
+          If Google does not show a consent screen, remove Declutter AI from your Google Account’s third-party app access, then connect again.
+        </p>
+      </div>
+      <a className="button primary" href={`/oauth2/authorization/google?${new URLSearchParams({
+        force_consent: 'true',
+        return_to: currentPath,
+      })}`}>
+        Upgrade Drive access
+      </a>
+    </section>
+  )
+}
+
+function DriveFileTable({ files }: { files: DriveFile[] }) {
+  return (
+    <div className="drive-table">
+      <div className="drive-row drive-head"><span>Name</span><span>Type</span><span>Modified</span><span>Space</span></div>
+      {files.map((file) => (
+        <a className="drive-row" key={file.id} href={file.webViewLink ?? '#'} target="_blank" rel="noreferrer">
+          <strong>{file.name}</strong>
+          <span>{driveFileType(file.mimeType)}</span>
+          <span>{formatDate(file.modifiedTime)}</span>
+          <span>{formatBytes(Number(file.quotaBytesUsed ?? file.size ?? 0))}</span>
+        </a>
+      ))}
+    </div>
   )
 }
 
@@ -743,6 +1227,27 @@ function formatDecision(decision: Decision) {
   return decision === 'KEEP_IT' ? 'Keep it'
     : decision === 'SAFE_TO_DELETE' ? 'Safe to delete'
       : 'Review'
+}
+
+function driveFileType(mimeType: string) {
+  if (mimeType.includes('document')) return 'Document'
+  if (mimeType.includes('spreadsheet')) return 'Spreadsheet'
+  if (mimeType.includes('presentation')) return 'Presentation'
+  if (mimeType.includes('form')) return 'Form'
+  if (mimeType.includes('folder')) return 'Folder'
+  return mimeType.replace('application/vnd.google-apps.', '').replace('application/', '')
+}
+
+function photosMediaType(mimeType: string) {
+  if (mimeType.startsWith('image/')) return 'Photo'
+  if (mimeType.startsWith('video/')) return 'Video'
+  return mimeType
+}
+
+function photosDimensions(item: PhotosMediaItem) {
+  const width = item.mediaMetadata?.width
+  const height = item.mediaMetadata?.height
+  return width && height ? `${width} × ${height}` : 'Unknown'
 }
 
 export default App

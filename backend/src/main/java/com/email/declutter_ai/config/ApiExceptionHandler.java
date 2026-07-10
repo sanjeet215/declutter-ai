@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.HttpClientErrorException;
 
 import com.email.declutter_ai.storage.StorageAccessException;
+import com.email.declutter_ai.photos.PhotosAccessException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -29,6 +30,15 @@ public class ApiExceptionHandler {
 		return ResponseEntity.status(HttpStatus.FORBIDDEN)
 				.body(Map.of(
 						"error", "storage_access_required",
+						"message", exception.getMessage()));
+	}
+
+	@ExceptionHandler(PhotosAccessException.class)
+	ResponseEntity<Map<String, String>> photosAccessDenied(
+			PhotosAccessException exception) {
+		return ResponseEntity.status(HttpStatus.FORBIDDEN)
+				.body(Map.of(
+						"error", "photos_access_required",
 						"message", exception.getMessage()));
 	}
 }

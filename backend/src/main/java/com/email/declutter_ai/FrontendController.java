@@ -37,4 +37,32 @@ public class FrontendController {
 				.location(frontendUri.resolve("/sender"))
 				.build();
 	}
+
+	@GetMapping("/drive")
+	ResponseEntity<Void> drive() {
+		return ResponseEntity.status(HttpStatus.FOUND)
+				.location(frontendUri.resolve("/drive"))
+				.build();
+	}
+
+	@GetMapping("/drive/untitled")
+	ResponseEntity<Void> driveUntitled() {
+		return ResponseEntity.status(HttpStatus.FOUND)
+				.location(frontendUri.resolve("/drive/untitled"))
+				.build();
+	}
+
+	@GetMapping("/drive/files")
+	ResponseEntity<Void> driveFiles() {
+		return ResponseEntity.status(HttpStatus.FOUND)
+				.location(frontendUri.resolve("/drive/files"))
+				.build();
+	}
+
+	@GetMapping("/photos")
+	ResponseEntity<Void> photos() {
+		return ResponseEntity.status(HttpStatus.FOUND)
+				.location(frontendUri.resolve("/photos"))
+				.build();
+	}
 }
